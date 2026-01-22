@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wevalid - Chemin de fer</title>
+    <link rel="stylesheet" href="chemin-de-fer.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-top">
+                <h1 id="project-title">Chargement...</h1>
+                <button id="back-btn" onclick="history.back()">← Retour</button>
+            </div>
+            
+            <!-- Barre de progression -->
+            <div class="progress-section">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="progress-text">0 / 0 pages (0%)</p>
+            </div>
+
+            <!-- Statistiques -->
+            <div class="stats-grid" id="stats-grid">
+                <!-- Rempli dynamiquement -->
+            </div>
+
+            <!-- Filtres -->
+            <div class="filters">
+                <button class="filter-btn active" data-status="all">Tous</button>
+                <button class="filter-btn" data-status="attente_elements">🔴 Attente</button>
+                <button class="filter-btn" data-status="elements_recus">🟡 Reçus</button>
+                <button class="filter-btn" data-status="en_maquette">🔵 Maquette</button>
+                <button class="filter-btn" data-status="maquette_a_valider">🟣 À valider</button>
+                <button class="filter-btn" data-status="maquette_validee_photogravure">🟢 Photogravure</button>
+                <button class="filter-btn" data-status="en_peaufinage">🟠 Peaufinage</button>
+                <button class="filter-btn" data-status="en_corrections">⚫ Corrections</button>
+                <button class="filter-btn" data-status="en_bat">🟤 BAT</button>
+                <button class="filter-btn" data-status="bat_valide">✅ BAT validé</button>
+                <button class="filter-btn" data-status="envoye_imprimeur">📤 Imprimeur</button>
+            </div>
+        </header>
+
+        <!-- Grille des pages -->
+        <div class="pages-grid" id="pages-grid">
+            <!-- Rempli dynamiquement -->
+        </div>
+
+        <!-- Légende -->
+        <div class="legend">
+            <h3>Légende des statuts</h3>
+            <div class="legend-grid">
+                <div class="legend-item"><span class="legend-color" style="background: #e74c3c;"></span> Attente éléments</div>
+                <div class="legend-item"><span class="legend-color" style="background: #f39c12;"></span> Éléments reçus</div>
+                <div class="legend-item"><span class="legend-color" style="background: #3498db;"></span> En maquette</div>
+                <div class="legend-item"><span class="legend-color" style="background: #9b59b6;"></span> Maquette à valider</div>
+                <div class="legend-item"><span class="legend-color" style="background: #2ecc71;"></span> Validée photogravure</div>
+                <div class="legend-item"><span class="legend-color" style="background: #e67e22;"></span> En peaufinage</div>
+                <div class="legend-item"><span class="legend-color" style="background: #95a5a6;"></span> En corrections</div>
+                <div class="legend-item"><span class="legend-color" style="background: #8b4513;"></span> En BAT</div>
+                <div class="legend-item"><span class="legend-color" style="background: #27ae60;"></span> BAT validé</div>
+                <div class="legend-item"><span class="legend-color" style="background: #1a5490;"></span> Envoyé imprimeur</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="loading">
+        <div class="loading-spinner"></div>
+        <p>Chargement du projet...</p>
+    </div>
+
+    <script src="chemin-de-fer.js"></script>
+</body>
+</html>

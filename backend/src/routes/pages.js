@@ -15,7 +15,15 @@ router.get('/project/:projectId', async (req, res) => {
     const result = await pool.query(
       `SELECT p.*, 
               COUNT(DISTINCT f.id) as files_count,
-              COUNT(DISTINCT a.id) as annotations_count
+              COUNT(DISTINCT a.id) as annotations_count,
+              (
+                SELECT f2.id 
+                FROM files f2 
+                WHERE f2.page_id = p.id 
+                  AND f2.is_current = true
+                ORDER BY f2.uploaded_at DESC 
+                LIMIT 1
+              ) as latest_file_id
        FROM pages p
        LEFT JOIN files f ON p.id = f.page_id
        LEFT JOIN annotations a ON p.id = a.page_id
