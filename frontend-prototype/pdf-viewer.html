@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wevalid - Viewer PDF</title>
+    
+    <!-- PDF.js depuis CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <link rel="stylesheet" href="pdf-viewer.css">
+</head>
+<body>
+    <div class="viewer-container">
+        <!-- Header avec contrôles -->
+        <div class="viewer-header">
+            <div class="controls">
+                <button id="prev-page">◀ Précédent</button>
+                <span id="page-info">Page 1 / 1</span>
+                <button id="next-page">Suivant ▶</button>
+                
+                <button id="zoom-out">-</button>
+                <span id="zoom-level">100%</span>
+                <button id="zoom-in">+</button>
+                
+                <button id="fullscreen">⛶ Plein écran</button>
+            </div>
+        </div>
+
+        <!-- Contenu principal -->
+        <div class="viewer-content">
+            <!-- Sidebar annotations -->
+            <div class="annotations-sidebar">
+                <h3>Annotations (<span id="annotations-count">0</span>)</h3>
+                <button id="add-annotation-btn">+ Ajouter une annotation</button>
+                <div id="annotations-list"></div>
+            </div>
+
+            <!-- Zone PDF -->
+            <div class="pdf-container">
+                <canvas id="pdf-canvas"></canvas>
+                <svg id="annotations-layer"></svg>
+            </div>
+        </div>
+    </div>
+
+    <script src="pdf-viewer.js"></script>
+</body>
+</html>

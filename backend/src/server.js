@@ -14,7 +14,9 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // Middlewares de sécurité
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false
+}));
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true
@@ -31,6 +33,9 @@ app.use('/api/', limiter);
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Servir le frontend statique
+app.use(express.static('/app/frontend'));
 
 // Logging des requêtes
 app.use((req, res, next) => {
