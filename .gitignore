@@ -1,0 +1,18 @@
+# Fichiers sensibles
+.env
+*.env
+
+# Données
+postgres-data/
+redis-data/
+storage/
+logs/
+
+# Node modules
+node_modules/
+package-lock.json
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+*.log
