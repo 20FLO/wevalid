@@ -166,11 +166,11 @@ CREATE TRIGGER update_annotations_updated_at BEFORE UPDATE ON annotations
 -- Mot de passe par défaut pour tous: "Password123!"
 -- Hash bcrypt de "Password123!" avec salt rounds = 12
 INSERT INTO users (email, password_hash, first_name, last_name, role) VALUES
-    ('editeur@wevalid.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7lUlhEe5Fm', 'Marie', 'Dupont', 'editeur'),
-    ('auteur@wevalid.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7lUlhEe5Fm', 'Jean', 'Martin', 'auteur'),
-    ('graphiste@wevalid.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7lUlhEe5Fm', 'Sophie', 'Bernard', 'graphiste'),
-    ('photograveur@wevalid.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7lUlhEe5Fm', 'Pierre', 'Dubois', 'photograveur'),
-    ('fabricant@wevalid.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7lUlhEe5Fm', 'Claire', 'Leroy', 'fabricant')
+    ('editeur@wevalid.com', '$2b$12$y7AIUM6palRxSNfuuQ6/2utN8WuV6wnWRZzxUvUkZwwtf4ibxERIC', 'Marie', 'Dupont', 'editeur'),
+    ('auteur@wevalid.com', '$2b$12$y7AIUM6palRxSNfuuQ6/2utN8WuV6wnWRZzxUvUkZwwtf4ibxERIC', 'Jean', 'Martin', 'auteur'),
+    ('graphiste@wevalid.com', '$2b$12$y7AIUM6palRxSNfuuQ6/2utN8WuV6wnWRZzxUvUkZwwtf4ibxERIC', 'Sophie', 'Bernard', 'graphiste'),
+    ('photograveur@wevalid.com', '$2b$12$y7AIUM6palRxSNfuuQ6/2utN8WuV6wnWRZzxUvUkZwwtf4ibxERIC', 'Pierre', 'Dubois', 'photograveur'),
+    ('fabricant@wevalid.com', '$2b$12$y7AIUM6palRxSNfuuQ6/2utN8WuV6wnWRZzxUvUkZwwtf4ibxERIC', 'Claire', 'Leroy', 'fabricant')
 ON CONFLICT (email) DO NOTHING;
 
 -- Projet de démonstration

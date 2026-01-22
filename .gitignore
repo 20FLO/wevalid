@@ -1,18 +1,46 @@
-# Fichiers sensibles
-.env
-*.env
+# Dépendances
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
 
-# Données
+# Build Next.js
+.next/
+out/
+build/
+dist/
+
+# Environnement local
+.env
+.env.*
+!.env.example
+
+# Données Docker (volumes)
 postgres-data/
 redis-data/
 storage/
 logs/
 
-# Node modules
-node_modules/
-package-lock.json
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Fichiers système
+# OS
 .DS_Store
 Thumbs.db
+
+# Logs
 *.log
+npm-debug.log*
+
+# Cache
+.cache/
+.turbo/
+
+# TypeScript
+*.tsbuildinfo
+
+# Prototype (HTML statique de démo)
+frontend-prototype/
