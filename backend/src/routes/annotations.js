@@ -13,7 +13,7 @@ router.get('/page/:pageId', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT a.*, 
+      `SELECT a.*,
               u.first_name || ' ' || u.last_name as author_name,
               u.role as author_role
        FROM annotations a
@@ -30,12 +30,11 @@ router.get('/page/:pageId', async (req, res) => {
   }
 });
 
-// Créer une annotation
+// Créer une annotation (tous les membres authentifiés)
 router.post('/', validate(schemas.createAnnotation), async (req, res) => {
   const { page_id, type, content, position, color } = req.validatedBody;
 
   try {
-    // Vérifier que la page existe
     const pageCheck = await pool.query('SELECT id FROM pages WHERE id = $1', [page_id]);
     if (pageCheck.rows.length === 0) {
       return res.status(404).json({ error: { message: 'Page non trouvée' } });
@@ -50,10 +49,10 @@ router.post('/', validate(schemas.createAnnotation), async (req, res) => {
 
     const annotation = result.rows[0];
 
-    logger.info('Annotation créée:', { 
-      annotationId: annotation.id, 
-      pageId: page_id, 
-      createdBy: req.user.id 
+    logger.info('Annotation créée:', {
+      annotationId: annotation.id,
+      pageId: page_id,
+      createdBy: req.user.id
     });
 
     res.status(201).json({
@@ -72,7 +71,6 @@ router.put('/:id', async (req, res) => {
   const { content, position, color, resolved } = req.body;
 
   try {
-    // Récupérer l'annotation actuelle
     const currentAnnotation = await pool.query(
       'SELECT * FROM annotations WHERE id = $1',
       [id]
@@ -84,8 +82,12 @@ router.put('/:id', async (req, res) => {
 
     const annotation = currentAnnotation.rows[0];
 
-    // Seul le créateur peut modifier (sauf pour "resolved" que tout le monde peut changer)
-    if (annotation.created_by !== req.user.id && typeof resolved === 'undefined') {
+    // Admin peut tout modifier
+    // Le créateur peut modifier son annotation
+    // Tout le monde peut changer "resolved"
+    if (req.user.role !== 'admin' && 
+        annotation.created_by !== req.user.id && 
+        typeof resolved === 'undefined') {
       return res.status(403).json({ error: { message: 'Seul le créateur peut modifier cette annotation' } });
     }
 
@@ -120,7 +122,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Supprimer une annotation
+// Supprimer une annotation (admin + éditeur + auteur de l'annotation)
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -131,10 +133,12 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: { message: 'Annotation non trouvée' } });
     }
 
-    // Seul le créateur, l'éditeur ou le fabricant peuvent supprimer
-    if (annotation.rows[0].created_by !== req.user.id && 
-        req.user.role !== 'editeur' && 
-        req.user.role !== 'fabricant') {
+    // Admin a tous les droits
+    // Éditeur peut supprimer toutes les annotations
+    // Le créateur peut supprimer sa propre annotation
+    if (req.user.role !== 'admin' &&
+        req.user.role !== 'editeur' &&
+        annotation.rows[0].created_by !== req.user.id) {
       return res.status(403).json({ error: { message: 'Accès refusé' } });
     }
 

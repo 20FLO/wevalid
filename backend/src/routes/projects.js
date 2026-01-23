@@ -27,8 +27,8 @@ router.get('/', async (req, res) => {
     const params = [];
     let paramIndex = 1;
 
-    // Filtrer par rôle utilisateur
-    if (req.user.role !== 'editeur' && req.user.role !== 'fabricant') {
+    // Admin voit tout, éditeur et fabricant aussi, les autres seulement leurs projets
+    if (!['admin', 'editeur', 'fabricant'].includes(req.user.role)) {
       query += ` AND p.id IN (
         SELECT DISTINCT project_id FROM project_members WHERE user_id = $${paramIndex}
       )`;
@@ -55,13 +55,13 @@ router.get('/', async (req, res) => {
 
     // Compter le total
     const countQuery = `SELECT COUNT(DISTINCT p.id) FROM projects p WHERE 1=1 ${
-      req.user.role !== 'editeur' && req.user.role !== 'fabricant' 
+      !['admin', 'editeur', 'fabricant'].includes(req.user.role)
         ? 'AND p.id IN (SELECT DISTINCT project_id FROM project_members WHERE user_id = $1)' 
         : ''
     }`;
     const countResult = await pool.query(
       countQuery, 
-      req.user.role !== 'editeur' && req.user.role !== 'fabricant' ? [req.user.id] : []
+      !['admin', 'editeur', 'fabricant'].includes(req.user.role) ? [req.user.id] : []
     );
 
     res.json({
@@ -102,8 +102,8 @@ router.get('/:id', async (req, res) => {
 
     const project = result.rows[0];
 
-    // Vérifier les permissions
-    if (req.user.role !== 'editeur' && req.user.role !== 'fabricant') {
+    // Admin voit tout, éditeur et fabricant aussi, les autres doivent être membres
+    if (!['admin', 'editeur', 'fabricant'].includes(req.user.role)) {
       const memberCheck = await pool.query(
         'SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2',
         [id, req.user.id]
@@ -133,8 +133,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Créer un nouveau projet
-router.post('/', authorizeRoles('editeur', 'fabricant'), validate(schemas.createProject), async (req, res) => {
+// Créer un nouveau projet (admin + fabricant + éditeurs)
+router.post('/', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schemas.createProject), async (req, res) => {
   const { title, isbn, description, total_pages } = req.validatedBody;
 
   const client = await pool.connect();
@@ -186,8 +186,8 @@ router.post('/', authorizeRoles('editeur', 'fabricant'), validate(schemas.create
   }
 });
 
-// Mettre à jour un projet
-router.put('/:id', authorizeRoles('editeur', 'fabricant'), validate(schemas.updateProject), async (req, res) => {
+// Mettre à jour un projet (admin + fabricant + éditeurs)
+router.put('/:id', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schemas.updateProject), async (req, res) => {
   const { id } = req.params;
   const updates = req.validatedBody;
 
@@ -220,8 +220,8 @@ router.put('/:id', authorizeRoles('editeur', 'fabricant'), validate(schemas.upda
   }
 });
 
-// Supprimer un projet
-router.delete('/:id', authorizeRoles('editeur', 'fabricant'), async (req, res) => {
+// Supprimer un projet (admin uniquement)
+router.delete('/:id', authorizeRoles('admin'), async (req, res) => {
   const { id } = req.params;
 
   const client = await pool.connect();
@@ -235,7 +235,7 @@ router.delete('/:id', authorizeRoles('editeur', 'fabricant'), async (req, res) =
       return res.status(404).json({ error: { message: 'Projet non trouvé' } });
     }
 
-    // Supprimer les dépendances (CASCADE devrait gérer cela, mais on le fait explicitement)
+    // Supprimer les dépendances
     await client.query('DELETE FROM annotations WHERE page_id IN (SELECT id FROM pages WHERE project_id = $1)', [id]);
     await client.query('DELETE FROM files WHERE page_id IN (SELECT id FROM pages WHERE project_id = $1)', [id]);
     await client.query('DELETE FROM pages WHERE project_id = $1', [id]);
@@ -256,8 +256,8 @@ router.delete('/:id', authorizeRoles('editeur', 'fabricant'), async (req, res) =
   }
 });
 
-// Ajouter un membre au projet
-router.post('/:id/members', authorizeRoles('editeur', 'fabricant'), async (req, res) => {
+// Ajouter un membre au projet (admin + éditeurs + fabricant)
+router.post('/:id/members', authorizeRoles('admin', 'editeur', 'fabricant'), async (req, res) => {
   const { id } = req.params;
   const { user_id } = req.body;
 
@@ -302,8 +302,8 @@ router.post('/:id/members', authorizeRoles('editeur', 'fabricant'), async (req, 
   }
 });
 
-// Retirer un membre du projet
-router.delete('/:id/members/:userId', authorizeRoles('editeur', 'fabricant'), async (req, res) => {
+// Retirer un membre du projet (admin + éditeurs + fabricant)
+router.delete('/:id/members/:userId', authorizeRoles('admin', 'editeur', 'fabricant'), async (req, res) => {
   const { id, userId } = req.params;
 
   try {

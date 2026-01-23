@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -31,7 +31,6 @@ router.get('/thumbnail/:id', async (req, res) => {
       return res.status(404).json({ error: { message: 'Pas de miniature disponible' } });
     }
 
-    // Vérifier que le fichier existe
     try {
       await fs.access(file.thumbnail_path);
     } catch {
@@ -51,8 +50,8 @@ router.get('/thumbnail/:id', async (req, res) => {
 
 router.use(authenticateToken);
 
-// Upload de fichier(s) pour une page
-router.post('/upload', upload.array('files', 10), async (req, res) => {
+// Upload de fichier(s) pour une page (admin + fabricant + auteurs + éditeurs)
+router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.array('files', 10), async (req, res) => {
   const { page_id } = req.body;
 
   if (!page_id) {
@@ -67,7 +66,6 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Vérifier que la page existe
     const pageCheck = await client.query('SELECT id, project_id FROM pages WHERE id = $1', [page_id]);
     if (pageCheck.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -77,20 +75,17 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
     const uploadedFiles = [];
 
     for (const file of req.files) {
-      // Marquer les anciens fichiers comme is_current = false
       await client.query(
         'UPDATE files SET is_current = false WHERE page_id = $1 AND is_current = true',
         [page_id]
       );
 
-      // Récupérer le numéro de version suivant
       const versionResult = await client.query(
         'SELECT COALESCE(MAX(version), 0) + 1 as next_version FROM files WHERE page_id = $1',
         [page_id]
       );
       const nextVersion = versionResult.rows[0].next_version;
 
-      // Générer une miniature si c'est un PDF ou une image
       let thumbnailPath = null;
       
       if (file.mimetype === 'application/pdf') {
@@ -99,7 +94,6 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
         thumbnailPath = await generateImageThumbnail(file.path);
       }
 
-      // Insérer dans la DB avec is_current = true et version
       const result = await client.query(
         `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -113,8 +107,8 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
           file.mimetype,
           file.size,
           req.user.id,
-          true, // is_current
-          nextVersion // version
+          true,
+          nextVersion
         ]
       );
 
@@ -143,18 +137,8 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
   }
 });
 
-// ============================================
-// UPLOAD PDF COMPLET AVEC DÉCOUPAGE AUTO
-// ============================================
-
-router.post('/upload-complete-pdf', upload.single('file'), async (req, res) => {
-  console.log('=== DEBUG UPLOAD ===');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  console.log('File:', req.file);
-  console.log('Query:', req.query);
-  console.log('===================');
-
+// Upload PDF complet avec découpage auto (admin + fabricant + auteurs + éditeurs)
+router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.single('file'), async (req, res) => {
   const project_id = req.body.project_id || req.query.project_id;
 
   if (!project_id) {
@@ -173,7 +157,6 @@ router.post('/upload-complete-pdf', upload.single('file'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Vérifier que le projet existe
     const projectCheck = await client.query('SELECT id, total_pages FROM projects WHERE id = $1', [project_id]);
     if (projectCheck.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -181,8 +164,6 @@ router.post('/upload-complete-pdf', upload.single('file'), async (req, res) => {
     }
 
     const project = projectCheck.rows[0];
-
-    // Compter le nombre de pages du PDF
     const pdfPageCount = await countPDFPages(req.file.path);
 
     logger.info('PDF complet uploadé:', { 
@@ -191,7 +172,6 @@ router.post('/upload-complete-pdf', upload.single('file'), async (req, res) => {
       pagesInProject: project.total_pages 
     });
 
-    // Découper le PDF et assigner aux pages
     const uploadedFiles = await splitAndAssignPDF(
       req.file.path, 
       project_id, 
@@ -230,26 +210,21 @@ router.get('/download/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await pool.query(
-      'SELECT * FROM files WHERE id = $1',
-      [id]
-    );
+    const result = await pool.query('SELECT * FROM files WHERE id = $1', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: { message: 'Fichier non trouvé' } });
     }
 
     const file = result.rows[0];
-    const filePath = file.file_path;
 
-    // Vérifier que le fichier existe
     try {
-      await fs.access(filePath);
+      await fs.access(file.file_path);
     } catch {
       return res.status(404).json({ error: { message: 'Fichier physique introuvable' } });
     }
 
-    res.download(filePath, file.original_filename);
+    res.download(file.file_path, file.original_filename);
 
     logger.info('Fichier téléchargé:', { fileId: id, downloadedBy: req.user.id });
   } catch (error) {
@@ -258,7 +233,7 @@ router.get('/download/:id', async (req, res) => {
   }
 });
 
-// Supprimer un fichier
+// Supprimer un fichier (admin + fabricant + éditeurs, ou l'uploader)
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -275,15 +250,18 @@ router.delete('/:id', async (req, res) => {
 
     const file = result.rows[0];
 
-    // Vérifier les permissions (seulement le uploader, l'éditeur ou le fabricant peuvent supprimer)
-    if (file.uploaded_by !== req.user.id && 
-        req.user.role !== 'editeur' && 
-        req.user.role !== 'fabricant') {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: { message: 'Accès refusé' } });
+    // Admin a tous les droits, sinon vérifier permissions
+    if (req.user.role !== 'admin') {
+      // Fabricant et éditeur peuvent supprimer
+      // L'uploader peut supprimer son propre fichier
+      if (file.uploaded_by !== req.user.id && 
+          req.user.role !== 'editeur' && 
+          req.user.role !== 'fabricant') {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: { message: 'Accès refusé' } });
+      }
     }
 
-    // Supprimer les fichiers physiques
     try {
       await fs.unlink(file.file_path);
       if (file.thumbnail_path) {
@@ -293,7 +271,6 @@ router.delete('/:id', async (req, res) => {
       logger.warn('Erreur lors de la suppression des fichiers physiques:', error);
     }
 
-    // Supprimer de la DB
     await client.query('DELETE FROM files WHERE id = $1', [id]);
 
     await client.query('COMMIT');
@@ -338,7 +315,6 @@ router.get('/page/:pageId/history', async (req, res) => {
 // FONCTIONS UTILITAIRES
 // ============================================
 
-// Fonction pour générer une miniature d'image
 async function generateImageThumbnail(imagePath) {
   try {
     const thumbnailFilename = `thumb_${path.basename(imagePath)}`;
@@ -356,7 +332,6 @@ async function generateImageThumbnail(imagePath) {
   }
 }
 
-// Fonction pour générer une miniature de PDF
 async function generatePDFThumbnail(pdfPath) {
   try {
     const { exec } = require('child_process');
@@ -366,12 +341,10 @@ async function generatePDFThumbnail(pdfPath) {
     const thumbnailFilename = `thumb_${path.basename(pdfPath, '.pdf')}.jpg`;
     const thumbnailPath = path.join('/app/storage/thumbnails', thumbnailFilename);
 
-    // Utiliser ghostscript pour extraire la première page
     await execPromise(
       `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=jpeg -r150 -dFirstPage=1 -dLastPage=1 -sOutputFile=${thumbnailPath} ${pdfPath}`
     );
 
-    // Redimensionner avec sharp
     await sharp(thumbnailPath)
       .resize(300, 300, { fit: 'inside' })
       .jpeg({ quality: 80 })
@@ -386,8 +359,6 @@ async function generatePDFThumbnail(pdfPath) {
   }
 }
 
-// Compter le nombre de pages d'un PDF
-// Compter le nombre de pages d'un PDF
 async function countPDFPages(pdfPath) {
   try {
     const { exec } = require('child_process');
@@ -408,14 +379,12 @@ async function countPDFPages(pdfPath) {
   }
 }
 
-// Découper un PDF et assigner aux pages du projet
 async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client) {
   try {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execPromise = promisify(exec);
 
-    // Récupérer les pages du projet
     const pagesResult = await client.query(
       'SELECT id, page_number FROM pages WHERE project_id = $1 ORDER BY page_number',
       [projectId]
@@ -423,8 +392,6 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
 
     const projectPages = pagesResult.rows;
     const uploadedFiles = [];
-
-    // Limiter au nombre de pages du PDF ou du projet
     const maxPages = Math.min(pdfPageCount, projectPages.length);
 
     logger.info(`Découpage en cours: ${maxPages} pages à traiter...`);
@@ -433,37 +400,29 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
       const pageNum = i + 1;
       const projectPage = projectPages[i];
 
-      // Marquer les anciens fichiers de cette page comme is_current = false
       await client.query(
         'UPDATE files SET is_current = false WHERE page_id = $1 AND is_current = true',
         [projectPage.id]
       );
 
-      // Récupérer le numéro de version suivant
       const versionResult = await client.query(
         'SELECT COALESCE(MAX(version), 0) + 1 as next_version FROM files WHERE page_id = $1',
         [projectPage.id]
       );
       const nextVersion = versionResult.rows[0].next_version;
 
-      // Créer un nom de fichier unique
       const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(7);
       const outputFilename = `${timestamp}-${randomString}-page${pageNum}.pdf`;
       const outputPath = path.join('/app/storage/uploads', outputFilename);
 
-      // Extraire la page avec ghostscript
       await execPromise(
         `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dFirstPage=${pageNum} -dLastPage=${pageNum} -sOutputFile=${outputPath} ${pdfPath}`
       );
 
-      // Générer la miniature
       const thumbnailPath = await generatePDFThumbnail(outputPath);
-
-      // Récupérer la taille du fichier
       const stats = await fs.stat(outputPath);
 
-      // Insérer dans la DB
       const result = await client.query(
         `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -477,20 +436,18 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
           'application/pdf',
           stats.size,
           userId,
-          true, // is_current
-          nextVersion // version
+          true,
+          nextVersion
         ]
       );
 
       uploadedFiles.push(result.rows[0]);
 
-      // Log progression tous les 10 pages
       if (pageNum % 10 === 0) {
         logger.info(`Progression découpage: ${pageNum}/${maxPages} pages`);
       }
     }
 
-    // Supprimer le PDF original uploadé
     try {
       await fs.unlink(pdfPath);
     } catch (error) {
