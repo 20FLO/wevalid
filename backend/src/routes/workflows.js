@@ -179,3 +179,98 @@ router.get('/history/:projectId', async (req, res) => {
 });
 
 module.exports = router;
+
+// Dashboard global - stats tous projets
+router.get('/dashboard/overview', async (req, res) => {
+  try {
+    // Stats globales
+    const globalStats = await pool.query(`
+      SELECT 
+        COUNT(DISTINCT p.id) as total_projects,
+        COUNT(DISTINCT pg.id) as total_pages,
+        COUNT(DISTINCT f.id) as total_files,
+        COUNT(DISTINCT a.id) as total_annotations
+      FROM projects p
+      LEFT JOIN pages pg ON pg.project_id = p.id
+      LEFT JOIN files f ON f.page_id = pg.id
+      LEFT JOIN annotations a ON a.page_id = pg.id
+    `);
+
+    // Pages par statut (global)
+    const pagesByStatus = await pool.query(`
+      SELECT status, COUNT(*) as count
+      FROM pages
+      GROUP BY status
+      ORDER BY status
+    `);
+
+    // Projets par statut
+    const projectsByStatus = await pool.query(`
+      SELECT status, COUNT(*) as count
+      FROM projects
+      GROUP BY status
+      ORDER BY status
+    `);
+
+    // Activité récente (dernières 24h)
+    const recentActivity = await pool.query(`
+      SELECT 
+        'annotation' as type,
+        a.created_at,
+        u.first_name || ' ' || u.last_name as user_name,
+        p.title as project_title
+      FROM annotations a
+      JOIN users u ON a.created_by = u.id
+      JOIN pages pg ON a.page_id = pg.id
+      JOIN projects p ON pg.project_id = p.id
+      WHERE a.created_at > NOW() - INTERVAL '24 hours'
+      
+      UNION ALL
+      
+      SELECT 
+        'file' as type,
+        f.created_at,
+        u.first_name || ' ' || u.last_name as user_name,
+        p.title as project_title
+      FROM files f
+      JOIN users u ON f.uploaded_by = u.id
+      JOIN pages pg ON f.page_id = pg.id
+      JOIN projects p ON pg.project_id = p.id
+      WHERE f.created_at > NOW() - INTERVAL '24 hours'
+      
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+
+    // Progression par projet
+    const projectsProgress = await pool.query(`
+      SELECT 
+        p.id,
+        p.title,
+        p.status,
+        COUNT(pg.id) as total_pages,
+        COUNT(CASE WHEN pg.status = 'bat_valide' THEN 1 END) as validated_pages
+      FROM projects p
+      LEFT JOIN pages pg ON pg.project_id = p.id
+      GROUP BY p.id, p.title, p.status
+      ORDER BY p.created_at DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      global: globalStats.rows[0],
+      pages_by_status: pagesByStatus.rows,
+      projects_by_status: projectsByStatus.rows,
+      recent_activity: recentActivity.rows,
+      projects_progress: projectsProgress.rows.map(p => ({
+        ...p,
+        progress_percent: p.total_pages > 0 
+          ? Math.round((p.validated_pages / p.total_pages) * 100) 
+          : 0
+      }))
+    });
+  } catch (error) {
+    logger.error('Erreur dashboard overview:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
