@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WeValid - Test Annotations</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; }
+    
+    .header { background: #16213e; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #0f3460; }
+    .header h1 { font-size: 1.5rem; color: #e94560; }
+    .header .user-info { display: flex; align-items: center; gap: 1rem; }
+    .header .user-info span { color: #a0a0a0; }
+    .btn { padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; }
+    .btn-primary { background: #e94560; color: #fff; }
+    .btn-primary:hover { background: #ff6b6b; }
+    .btn-secondary { background: #0f3460; color: #fff; }
+    .btn-secondary:hover { background: #1a4a7a; }
+    .btn-success { background: #00d26a; color: #fff; }
+    .btn-success:hover { background: #00b359; }
+    
+    .container { display: flex; height: calc(100vh - 60px); }
+    
+    .sidebar { width: 300px; background: #16213e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; }
+    .sidebar-section { padding: 1rem; border-bottom: 1px solid #0f3460; }
+    .sidebar-section h3 { font-size: 0.9rem; color: #a0a0a0; margin-bottom: 0.5rem; text-transform: uppercase; }
+    
+    .login-form { display: flex; flex-direction: column; gap: 0.5rem; }
+    .login-form input { padding: 0.5rem; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #fff; }
+    .login-form input:focus { outline: none; border-color: #e94560; }
+    
+    .page-selector { display: flex; flex-direction: column; gap: 0.5rem; }
+    .page-selector select { padding: 0.5rem; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #fff; }
+    
+    .annotations-list { flex: 1; overflow-y: auto; padding: 1rem; }
+    .annotation-item { background: #1a1a2e; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.5rem; border-left: 3px solid #e94560; }
+    .annotation-item.resolved { opacity: 0.5; border-left-color: #00d26a; }
+    .annotation-item .author { font-size: 0.8rem; color: #a0a0a0; }
+    .annotation-item .content { margin-top: 0.25rem; }
+    .annotation-item .type { font-size: 0.7rem; background: #0f3460; padding: 0.1rem 0.4rem; border-radius: 2px; display: inline-block; margin-top: 0.25rem; }
+    .annotation-item .actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
+    .annotation-item .actions button { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+    
+    .main-content { flex: 1; display: flex; flex-direction: column; }
+    
+    .toolbar { background: #16213e; padding: 0.75rem 1rem; display: flex; gap: 1rem; align-items: center; border-bottom: 1px solid #0f3460; }
+    .toolbar .tool-group { display: flex; gap: 0.5rem; }
+    .toolbar .tool-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 4px; cursor: pointer; color: #fff; }
+    .toolbar .tool-btn:hover, .toolbar .tool-btn.active { background: #e94560; border-color: #e94560; }
+    
+    .pdf-container { flex: 1; position: relative; overflow: auto; background: #0d0d1a; display: flex; justify-content: center; padding: 2rem; }
+    #pdf-canvas { box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    
+    .annotations-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+    .annotations-layer.active { pointer-events: auto; cursor: crosshair; }
+    
+    .annotation-marker { position: absolute; background: rgba(255, 255, 0, 0.3); border: 2px solid #e94560; cursor: pointer; pointer-events: auto; }
+    .annotation-marker:hover { background: rgba(233, 69, 96, 0.3); }
+    .annotation-marker .marker-icon { position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; background: #e94560; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+    
+    .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
+    .modal.active { display: flex; }
+    .modal-content { background: #16213e; border-radius: 8px; padding: 1.5rem; width: 400px; max-width: 90%; }
+    .modal-content h2 { margin-bottom: 1rem; color: #e94560; }
+    .modal-content .form-group { margin-bottom: 1rem; }
+    .modal-content label { display: block; margin-bottom: 0.25rem; color: #a0a0a0; font-size: 0.9rem; }
+    .modal-content input, .modal-content textarea, .modal-content select { width: 100%; padding: 0.5rem; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #fff; }
+    .modal-content textarea { min-height: 100px; resize: vertical; }
+    .modal-content .btn-group { display: flex; gap: 0.5rem; justify-content: flex-end; }
+    
+    .status-bar { background: #16213e; padding: 0.5rem 1rem; font-size: 0.8rem; color: #a0a0a0; border-top: 1px solid #0f3460; display: flex; justify-content: space-between; }
+    
+    .toast { position: fixed; bottom: 2rem; right: 2rem; background: #00d26a; color: #fff; padding: 1rem 1.5rem; border-radius: 4px; display: none; z-index: 1001; }
+    .toast.error { background: #e94560; }
+    .toast.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎨 WeValid - Test Annotations</h1>
+    <div class="user-info">
+      <span id="user-display">Non connecté</span>
+      <button class="btn btn-secondary" id="logout-btn" style="display:none;">Déconnexion</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="sidebar">
+      <!-- Login -->
+      <div class="sidebar-section" id="login-section">
+        <h3>Connexion</h3>
+        <form class="login-form" id="login-form">
+          <input type="email" id="email" placeholder="Email" value="admin@wevalid.com">
+          <input type="password" id="password" placeholder="Mot de passe" value="admin123">
+          <button type="submit" class="btn btn-primary">Se connecter</button>
+        </form>
+      </div>
+
+      <!-- Page selector -->
+      <div class="sidebar-section" id="page-section" style="display:none;">
+        <h3>Sélection Page</h3>
+        <div class="page-selector">
+          <select id="project-select">
+            <option value="">Chargement...</option>
+          </select>
+          <select id="page-select">
+            <option value="">Sélectionner un projet</option>
+          </select>
+          <button class="btn btn-secondary" id="load-page-btn">Charger la page</button>
+        </div>
+      </div>
+
+      <!-- Export/Import XFDF -->
+      <div class="sidebar-section" id="xfdf-section" style="display:none;">
+        <h3>Import/Export Acrobat</h3>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <button class="btn btn-success" id="export-xfdf-btn">📤 Exporter XFDF</button>
+          <button class="btn btn-secondary" id="import-xfdf-btn">📥 Importer XFDF</button>
+          <input type="file" id="xfdf-file-input" accept=".xfdf" style="display:none;">
+        </div>
+      </div>
+
+      <!-- Annotations list -->
+      <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column;">
+        <h3>Annotations (<span id="annotations-count">0</span>)</h3>
+        <div class="annotations-list" id="annotations-list">
+          <p style="color: #666; font-size: 0.9rem;">Connectez-vous et chargez une page pour voir les annotations.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="toolbar">
+        <div class="tool-group">
+          <button class="tool-btn" id="tool-select" title="Sélection">🖱️</button>
+          <button class="tool-btn" id="tool-comment" title="Commentaire">💬</button>
+          <button class="tool-btn" id="tool-correction" title="Correction">✏️</button>
+          <button class="tool-btn" id="tool-question" title="Question">❓</button>
+          <button class="tool-btn" id="tool-validation" title="Validation">✅</button>
+        </div>
+        <div class="tool-group">
+          <input type="color" id="annotation-color" value="#FFFF00" title="Couleur">
+        </div>
+        <div style="flex:1;"></div>
+        <div class="tool-group">
+          <button class="tool-btn" id="zoom-out" title="Zoom -">➖</button>
+          <span id="zoom-level" style="padding: 0 0.5rem;">100%</span>
+          <button class="tool-btn" id="zoom-in" title="Zoom +">➕</button>
+        </div>
+      </div>
+
+      <div class="pdf-container" id="pdf-container">
+        <canvas id="pdf-canvas"></canvas>
+        <div class="annotations-layer" id="annotations-layer"></div>
+      </div>
+
+      <div class="status-bar">
+        <span id="status-text">Prêt</span>
+        <span id="page-info">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal nouvelle annotation -->
+  <div class="modal" id="annotation-modal">
+    <div class="modal-content">
+      <h2>Nouvelle annotation</h2>
+      <form id="annotation-form">
+        <div class="form-group">
+          <label>Type</label>
+          <select id="annot-type">
+            <option value="comment">Commentaire</option>
+            <option value="correction">Correction</option>
+            <option value="question">Question</option>
+            <option value="validation">Validation</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Contenu</label>
+          <textarea id="annot-content" placeholder="Votre annotation..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Couleur</label>
+          <input type="color" id="annot-color" value="#FFFF00">
+        </div>
+        <div class="btn-group">
+          <button type="button" class="btn btn-secondary" id="cancel-annotation">Annuler</button>
+          <button type="submit" class="btn btn-primary">Créer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let token = localStorage.getItem('wevalid_token');
+    let currentUser = null;
+    let currentPageId = null;
+    let currentTool = 'select';
+    let pdfDoc = null;
+    let currentScale = 1.0;
+    let annotations = [];
+    let pendingAnnotation = null;
+
+    // PDF.js config
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+      if (token) {
+        fetchUserProfile();
+      }
+      setupEventListeners();
+    });
+
+    function setupEventListeners() {
+      // Login
+      document.getElementById('login-form').addEventListener('submit', handleLogin);
+      document.getElementById('logout-btn').addEventListener('click', handleLogout);
+
+      // Page loading
+      document.getElementById('project-select').addEventListener('change', loadProjectPages);
+      document.getElementById('load-page-btn').addEventListener('click', loadSelectedPage);
+
+      // Tools
+      document.querySelectorAll('.tool-btn[id^="tool-"]').forEach(btn => {
+        btn.addEventListener('click', () => selectTool(btn.id.replace('tool-', '')));
+      });
+
+      // Zoom
+      document.getElementById('zoom-in').addEventListener('click', () => setZoom(currentScale + 0.25));
+      document.getElementById('zoom-out').addEventListener('click', () => setZoom(currentScale - 0.25));
+
+      // Annotation creation
+      document.getElementById('pdf-container').addEventListener('click', handleCanvasClick);
+      document.getElementById('annotation-form').addEventListener('submit', createAnnotation);
+      document.getElementById('cancel-annotation').addEventListener('click', () => {
+        document.getElementById('annotation-modal').classList.remove('active');
+        pendingAnnotation = null;
+      });
+
+      // XFDF
+      document.getElementById('export-xfdf-btn').addEventListener('click', exportXFDF);
+      document.getElementById('import-xfdf-btn').addEventListener('click', () => document.getElementById('xfdf-file-input').click());
+      document.getElementById('xfdf-file-input').addEventListener('change', importXFDF);
+    }
+
+    // Auth
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          token = data.accessToken;
+          localStorage.setItem('wevalid_token', token);
+          currentUser = data.user;
+          updateUILoggedIn();
+          loadProjects();
+          showToast('Connexion réussie !');
+        } else {
+          showToast(data.error?.message || 'Erreur de connexion', true);
+        }
+      } catch (err) {
+        showToast('Erreur réseau', true);
+      }
+    }
+
+    function handleLogout() {
+      token = null;
+      currentUser = null;
+      localStorage.removeItem('wevalid_token');
+      updateUILoggedOut();
+      showToast('Déconnexion réussie');
+    }
+
+    async function fetchUserProfile() {
+      try {
+        const res = await fetch(`${API_BASE}/api/users/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          updateUILoggedIn();
+          loadProjects();
+        } else {
+          handleLogout();
+        }
+      } catch (err) {
+        handleLogout();
+      }
+    }
+
+    function updateUILoggedIn() {
+      document.getElementById('login-section').style.display = 'none';
+      document.getElementById('page-section').style.display = 'block';
+      document.getElementById('xfdf-section').style.display = 'block';
+      document.getElementById('user-display').textContent = `${currentUser.first_name} ${currentUser.last_name} (${currentUser.role})`;
+      document.getElementById('logout-btn').style.display = 'block';
+    }
+
+    function updateUILoggedOut() {
+      document.getElementById('login-section').style.display = 'block';
+      document.getElementById('page-section').style.display = 'none';
+      document.getElementById('xfdf-section').style.display = 'none';
+      document.getElementById('user-display').textContent = 'Non connecté';
+      document.getElementById('logout-btn').style.display = 'none';
+    }
+
+    // Projects & Pages
+    async function loadProjects() {
+      try {
+        const res = await fetch(`${API_BASE}/api/projects`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+
+        const select = document.getElementById('project-select');
+        select.innerHTML = '<option value="">Sélectionner un projet</option>';
+        data.projects.forEach(p => {
+          select.innerHTML += `<option value="${p.id}">${p.title} (${p.total_pages} pages)</option>`;
+        });
+      } catch (err) {
+        showToast('Erreur chargement projets', true);
+      }
+    }
+
+    async function loadProjectPages() {
+      const projectId = document.getElementById('project-select').value;
+      if (!projectId) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/pages/project/${projectId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+
+        const select = document.getElementById('page-select');
+        select.innerHTML = '<option value="">Sélectionner une page</option>';
+        data.pages.forEach(p => {
+          select.innerHTML += `<option value="${p.id}">Page ${p.page_number} - ${p.status}</option>`;
+        });
+      } catch (err) {
+        showToast('Erreur chargement pages', true);
+      }
+    }
+
+    async function loadSelectedPage() {
+      const pageId = document.getElementById('page-select').value;
+      if (!pageId) {
+        showToast('Sélectionnez une page', true);
+        return;
+      }
+
+      currentPageId = pageId;
+      setStatus('Chargement de la page...');
+
+      try {
+        // Charger les infos de la page
+        const pageRes = await fetch(`${API_BASE}/api/pages/${pageId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const pageData = await pageRes.json();
+
+        // Trouver le fichier PDF courant
+        const currentFile = pageData.page.files?.find(f => f.is_current);
+        if (currentFile) {
+          await loadPDF(`${API_BASE}/api/files/download/${currentFile.id}`);
+        } else {
+          showToast('Aucun PDF pour cette page', true);
+        }
+
+        // Charger les annotations
+        await loadAnnotations();
+
+        document.getElementById('page-info').textContent = `Page ${pageData.page.page_number}`;
+        setStatus('Page chargée');
+      } catch (err) {
+        showToast('Erreur chargement page', true);
+        setStatus('Erreur');
+      }
+    }
+
+    // PDF Rendering
+    async function loadPDF(url) {
+      try {
+        const loadingTask = pdfjsLib.getDocument({
+          url: url,
+          httpHeaders: { 'Authorization': `Bearer ${token}` }
+        });
+        pdfDoc = await loadingTask.promise;
+        renderPage(1);
+      } catch (err) {
+        console.error('Erreur PDF:', err);
+        showToast('Erreur chargement PDF', true);
+      }
+    }
+
+    async function renderPage(pageNum) {
+      const page = await pdfDoc.getPage(pageNum);
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d');
+
+      const viewport = page.getViewport({ scale: currentScale });
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+      // Positionner la couche annotations
+      const layer = document.getElementById('annotations-layer');
+      const container = document.getElementById('pdf-container');
+      const canvasRect = canvas.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      layer.style.width = canvas.width + 'px';
+      layer.style.height = canvas.height + 'px';
+      layer.style.left = (canvasRect.left - containerRect.left + container.scrollLeft) + 'px';
+      layer.style.top = (canvasRect.top - containerRect.top + container.scrollTop) + 'px';
+
+      renderAnnotationMarkers();
+    }
+
+    function setZoom(scale) {
+      if (scale < 0.5 || scale > 3) return;
+      currentScale = scale;
+      document.getElementById('zoom-level').textContent = Math.round(scale * 100) + '%';
+      if (pdfDoc) renderPage(1);
+    }
+
+    // Annotations
+    async function loadAnnotations() {
+      if (!currentPageId) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations/page/${currentPageId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        annotations = data.annotations;
+        renderAnnotationsList();
+        renderAnnotationMarkers();
+        document.getElementById('annotations-count').textContent = annotations.length;
+      } catch (err) {
+        showToast('Erreur chargement annotations', true);
+      }
+    }
+
+    function renderAnnotationsList() {
+      const list = document.getElementById('annotations-list');
+      if (annotations.length === 0) {
+        list.innerHTML = '<p style="color: #666; font-size: 0.9rem;">Aucune annotation sur cette page.</p>';
+        return;
+      }
+
+      list.innerHTML = annotations.map(a => `
+        <div class="annotation-item ${a.resolved ? 'resolved' : ''}" data-id="${a.id}">
+          <div class="author">${a.author_name} - ${new Date(a.created_at).toLocaleString('fr-FR')}</div>
+          <div class="content">${a.content}</div>
+          <span class="type">${a.type}</span>
+          <div class="actions">
+            <button class="btn btn-secondary" onclick="toggleResolved(${a.id}, ${!a.resolved})">${a.resolved ? '🔄 Rouvrir' : '✅ Résolu'}</button>
+            <button class="btn btn-secondary" onclick="deleteAnnotation(${a.id})">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderAnnotationMarkers() {
+      const layer = document.getElementById('annotations-layer');
+      layer.innerHTML = '';
+
+      annotations.forEach(a => {
+        const pos = typeof a.position === 'string' ? JSON.parse(a.position) : a.position;
+        if (!pos) return;
+
+        const marker = document.createElement('div');
+        marker.className = 'annotation-marker';
+        marker.style.left = (pos.x * currentScale) + 'px';
+        marker.style.top = (pos.y * currentScale) + 'px';
+        marker.style.width = ((pos.width || 50) * currentScale) + 'px';
+        marker.style.height = ((pos.height || 50) * currentScale) + 'px';
+        marker.style.borderColor = a.color || '#e94560';
+        marker.innerHTML = `<span class="marker-icon">${getTypeIcon(a.type)}</span>`;
+        marker.title = `${a.author_name}: ${a.content}`;
+        marker.onclick = () => highlightAnnotation(a.id);
+        layer.appendChild(marker);
+      });
+    }
+
+    function getTypeIcon(type) {
+      const icons = { comment: '💬', correction: '✏️', question: '❓', validation: '✅', highlight: '🖍️' };
+      return icons[type] || '📝';
+    }
+
+    function highlightAnnotation(id) {
+      document.querySelectorAll('.annotation-item').forEach(el => el.style.background = '');
+      const item = document.querySelector(`.annotation-item[data-id="${id}"]`);
+      if (item) {
+        item.style.background = '#0f3460';
+        item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    // Tool selection
+    function selectTool(tool) {
+      currentTool = tool;
+      document.querySelectorAll('.tool-btn[id^="tool-"]').forEach(btn => btn.classList.remove('active'));
+      document.getElementById(`tool-${tool}`).classList.add('active');
+
+      const layer = document.getElementById('annotations-layer');
+      layer.classList.toggle('active', tool !== 'select');
+
+      setStatus(`Outil: ${tool}`);
+    }
+
+    // Create annotation
+    function handleCanvasClick(e) {
+      if (currentTool === 'select' || !currentPageId) return;
+
+      const container = document.getElementById('pdf-container');
+      const canvas = document.getElementById('pdf-canvas');
+      const canvasRect = canvas.getBoundingClientRect();
+
+      const x = (e.clientX - canvasRect.left) / currentScale;
+      const y = (e.clientY - canvasRect.top) / currentScale;
+
+      pendingAnnotation = { x, y, width: 50, height: 50 };
+
+      document.getElementById('annot-type').value = currentTool;
+      document.getElementById('annot-color').value = document.getElementById('annotation-color').value;
+      document.getElementById('annot-content').value = '';
+      document.getElementById('annotation-modal').classList.add('active');
+    }
+
+    async function createAnnotation(e) {
+      e.preventDefault();
+
+      const type = document.getElementById('annot-type').value;
+      const content = document.getElementById('annot-content').value;
+      const color = document.getElementById('annot-color').value;
+
+      if (!content.trim()) {
+        showToast('Contenu requis', true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            page_id: parseInt(currentPageId),
+            type,
+            content,
+            position: pendingAnnotation,
+            color
+          })
+        });
+
+        if (res.ok) {
+          showToast('Annotation créée !');
+          document.getElementById('annotation-modal').classList.remove('active');
+          pendingAnnotation = null;
+          await loadAnnotations();
+        } else {
+          const data = await res.json();
+          showToast(data.error?.message || 'Erreur', true);
+        }
+      } catch (err) {
+        showToast('Erreur réseau', true);
+      }
+    }
+
+    async function toggleResolved(id, resolved) {
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ resolved })
+        });
+
+        if (res.ok) {
+          showToast(resolved ? 'Annotation résolue' : 'Annotation rouverte');
+          await loadAnnotations();
+        }
+      } catch (err) {
+        showToast('Erreur', true);
+      }
+    }
+
+    async function deleteAnnotation(id) {
+      if (!confirm('Supprimer cette annotation ?')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          showToast('Annotation supprimée');
+          await loadAnnotations();
+        } else {
+          const data = await res.json();
+          showToast(data.error?.message || 'Erreur', true);
+        }
+      } catch (err) {
+        showToast('Erreur', true);
+      }
+    }
+
+    // XFDF Export/Import
+    async function exportXFDF() {
+      if (!currentPageId) {
+        showToast('Chargez une page d\'abord', true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations/page/${currentPageId}/export-xfdf`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `annotations_page_${currentPageId}.xfdf`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast('Export XFDF réussi !');
+        } else {
+          showToast('Erreur export', true);
+        }
+      } catch (err) {
+        showToast('Erreur réseau', true);
+      }
+    }
+
+    async function importXFDF(e) {
+      const file = e.target.files[0];
+      if (!file || !currentPageId) return;
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const res = await fetch(`${API_BASE}/api/annotations/page/${currentPageId}/import-xfdf`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ xfdf: event.target.result })
+          });
+
+          const data = await res.json();
+          if (res.ok) {
+            showToast(data.message);
+            await loadAnnotations();
+          } else {
+            showToast(data.error?.message || 'Erreur import', true);
+          }
+        } catch (err) {
+          showToast('Erreur réseau', true);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+
+    // Utils
+    function setStatus(text) {
+      document.getElementById('status-text').textContent = text;
+    }
+
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast active ${isError ? 'error' : ''}`;
+      setTimeout(() => toast.classList.remove('active'), 3000);
+    }
+  </script>
+</body>
+</html>
