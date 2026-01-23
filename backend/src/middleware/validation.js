@@ -48,7 +48,8 @@ const schemas = {
     title: Joi.string().min(1).max(200).required(),
     isbn: Joi.string().pattern(/^[0-9-]{10,17}$/).allow('', null),
     description: Joi.string().max(1000).allow('', null),
-    total_pages: Joi.number().integer().min(1).max(10000).required()
+    total_pages: Joi.number().integer().min(1).max(10000).required(),
+    format: Joi.string().max(50).allow('', null)
   }),
 
   updateProject: Joi.object({
@@ -56,6 +57,7 @@ const schemas = {
     isbn: Joi.string().pattern(/^[0-9-]{10,17}$/).allow('', null),
     description: Joi.string().max(1000).allow('', null),
     total_pages: Joi.number().integer().min(1).max(10000),
+    format: Joi.string().max(50).allow('', null),
     status: Joi.string().valid('draft', 'in_progress', 'bat', 'completed', 'archived')
   }),
 

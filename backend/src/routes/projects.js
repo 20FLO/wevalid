@@ -135,7 +135,7 @@ router.get('/:id', async (req, res) => {
 
 // Créer un nouveau projet (admin + fabricant + éditeurs)
 router.post('/', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schemas.createProject), async (req, res) => {
-  const { title, isbn, description, total_pages } = req.validatedBody;
+  const { title, isbn, description, total_pages, format } = req.validatedBody;
 
   const client = await pool.connect();
   try {
@@ -143,10 +143,10 @@ router.post('/', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schem
 
     // Créer le projet
     const projectResult = await client.query(
-      `INSERT INTO projects (title, isbn, description, total_pages, status, created_by)
-       VALUES ($1, $2, $3, $4, 'draft', $5)
+      `INSERT INTO projects (title, isbn, description, total_pages, format, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'draft', $6)
        RETURNING *`,
-      [title, isbn, description, total_pages, req.user.id]
+      [title, isbn, description, total_pages, format, req.user.id]
     );
 
     const project = projectResult.rows[0];
