@@ -6,63 +6,114 @@ const logger = require('../utils/logger');
 
 router.use(authenticateToken);
 
+// Définition des transitions possibles par statut et rôle
+const workflowRules = {
+  'attente_elements': {
+    'auteur': ['elements_recus'],
+    'editeur': ['elements_recus'],
+    'graphiste': ['elements_recus']
+  },
+  'elements_recus': {
+    'editeur': ['ok_pour_maquette'],
+    'fabricant': ['ok_pour_maquette']
+  },
+  'ok_pour_maquette': {
+    'graphiste': ['en_maquette'],
+    'editeur': ['en_maquette']
+  },
+  'en_maquette': {
+    'graphiste': ['maquette_a_valider'],
+    'editeur': ['maquette_a_valider']
+  },
+  'maquette_a_valider': {
+    'editeur': ['maquette_validee_photogravure', 'pour_corrections'],
+    'fabricant': ['maquette_validee_photogravure', 'pour_corrections'],
+    'auteur': ['maquette_validee_photogravure', 'pour_corrections']
+  },
+  'maquette_validee_photogravure': {
+    'photograveur': ['en_bat'],
+    'graphiste': ['en_peaufinage'],
+    'editeur': ['en_peaufinage']
+  },
+  'en_peaufinage': {
+    'graphiste': ['maquette_a_valider'],
+    'editeur': ['maquette_a_valider']
+  },
+  'pour_corrections': {
+    'graphiste': ['maquette_a_valider'],
+    'auteur': ['maquette_a_valider']
+  },
+  'en_bat': {
+    'photograveur': ['bat_valide'],
+    'editeur': ['pour_corrections', 'bat_valide']
+  },
+  'bat_valide': {
+    'editeur': ['pdf_hd_ok'],
+    'fabricant': ['pdf_hd_ok']
+  },
+  'pdf_hd_ok': {
+    // État final, pas de transition
+  }
+};
+
+// Labels pour l'affichage
+const statusLabels = {
+  'attente_elements': 'Attente éléments',
+  'elements_recus': 'Éléments reçus',
+  'ok_pour_maquette': 'OK pour maquette',
+  'en_maquette': 'En maquette',
+  'maquette_a_valider': 'Maquette à valider',
+  'maquette_validee_photogravure': 'Validée photogravure',
+  'en_peaufinage': 'En peaufinage',
+  'pour_corrections': 'Pour corrections',
+  'en_bat': 'En BAT',
+  'bat_valide': 'BAT validé',
+  'pdf_hd_ok': 'PDF HD OK'
+};
+
+// Notifications par statut -> rôles à notifier
+const notificationRules = {
+  'elements_recus': ['fabricant', 'editeur'],
+  'ok_pour_maquette': ['graphiste'],
+  'maquette_a_valider': ['editeur', 'fabricant', 'auteur'],
+  'maquette_validee_photogravure': ['fabricant'],
+  'en_peaufinage': ['graphiste'],
+  'pour_corrections': ['graphiste'],
+  'en_bat': ['editeur', 'fabricant'],
+  'bat_valide': ['editeur', 'fabricant'],
+  'pdf_hd_ok': ['photograveur']
+};
+
+// Exporter pour utilisation dans pages.js
+router.workflowRules = workflowRules;
+router.statusLabels = statusLabels;
+router.notificationRules = notificationRules;
+
 // Récupérer les transitions autorisées pour un statut donné
 router.get('/transitions/:status', async (req, res) => {
   const { status } = req.params;
   const userRole = req.user.role;
 
-  // Définition des transitions possibles par statut et rôle
-  const workflowRules = {
-    'attente_elements': {
-      'auteur': ['elements_recus'],
-      'editeur': ['elements_recus'],
-      'graphiste': ['elements_recus']
-    },
-    'elements_recus': {
-      'editeur': ['en_maquette'],
-      'graphiste': ['en_maquette']
-    },
-    'en_maquette': {
-      'graphiste': ['maquette_a_valider'],
-      'editeur': ['maquette_a_valider']
-    },
-    'maquette_a_valider': {
-      'editeur': ['maquette_validee_photogravure', 'en_corrections'],
-      'fabricant': ['maquette_validee_photogravure', 'en_corrections']
-    },
-    'maquette_validee_photogravure': {
-      'photograveur': ['en_bat'],
-      'graphiste': ['en_peaufinage'],
-      'editeur': ['en_peaufinage']
-    },
-    'en_peaufinage': {
-      'graphiste': ['maquette_a_valider'],
-      'editeur': ['maquette_a_valider']
-    },
-    'en_corrections': {
-      'graphiste': ['maquette_a_valider'],
-      'auteur': ['maquette_a_valider']
-    },
-    'en_bat': {
-      'photograveur': ['bat_valide'],
-      'editeur': ['en_corrections', 'bat_valide']
-    },
-    'bat_valide': {
-      'editeur': ['envoye_imprimeur'],
-      'fabricant': ['envoye_imprimeur']
-    },
-    'envoye_imprimeur': {
-      // État final, pas de transition
-    }
-  };
-
   const allowedTransitions = workflowRules[status]?.[userRole] || [];
 
   res.json({
     current_status: status,
+    current_status_label: statusLabels[status] || status,
     user_role: userRole,
-    allowed_transitions: allowedTransitions
+    allowed_transitions: allowedTransitions.map(s => ({
+      status: s,
+      label: statusLabels[s] || s
+    }))
   });
+});
+
+// Récupérer tous les statuts possibles
+router.get('/statuses', async (req, res) => {
+  const statuses = Object.entries(statusLabels).map(([key, label]) => ({
+    status: key,
+    label: label
+  }));
+  res.json({ statuses });
 });
 
 // Récupérer les statistiques de workflow pour un projet
@@ -81,10 +132,10 @@ router.get('/stats/:projectId', async (req, res) => {
       [projectId]
     );
 
-    // Calculer les pourcentages
     const total = result.rows.reduce((sum, row) => sum + parseInt(row.count), 0);
     const stats = result.rows.map(row => ({
       status: row.status,
+      label: statusLabels[row.status] || row.status,
       count: parseInt(row.count),
       percentage: total > 0 ? Math.round((parseInt(row.count) / total) * 100) : 0
     }));

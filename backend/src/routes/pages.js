@@ -4,8 +4,70 @@ const { pool } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const logger = require('../utils/logger');
+const { sendStatusChangeNotification } = require('../utils/emailService');
 
 router.use(authenticateToken);
+
+// Règles de transition par statut et rôle
+const workflowRules = {
+  'attente_elements': {
+    'auteur': ['elements_recus'],
+    'editeur': ['elements_recus'],
+    'graphiste': ['elements_recus']
+  },
+  'elements_recus': {
+    'editeur': ['ok_pour_maquette'],
+    'fabricant': ['ok_pour_maquette']
+  },
+  'ok_pour_maquette': {
+    'graphiste': ['en_maquette'],
+    'editeur': ['en_maquette']
+  },
+  'en_maquette': {
+    'graphiste': ['maquette_a_valider'],
+    'editeur': ['maquette_a_valider']
+  },
+  'maquette_a_valider': {
+    'editeur': ['maquette_validee_photogravure', 'pour_corrections'],
+    'fabricant': ['maquette_validee_photogravure', 'pour_corrections'],
+    'auteur': ['maquette_validee_photogravure', 'pour_corrections']
+  },
+  'maquette_validee_photogravure': {
+    'photograveur': ['en_bat'],
+    'graphiste': ['en_peaufinage'],
+    'editeur': ['en_peaufinage']
+  },
+  'en_peaufinage': {
+    'graphiste': ['maquette_a_valider'],
+    'editeur': ['maquette_a_valider']
+  },
+  'pour_corrections': {
+    'graphiste': ['maquette_a_valider'],
+    'auteur': ['maquette_a_valider']
+  },
+  'en_bat': {
+    'photograveur': ['bat_valide'],
+    'editeur': ['pour_corrections', 'bat_valide']
+  },
+  'bat_valide': {
+    'editeur': ['pdf_hd_ok'],
+    'fabricant': ['pdf_hd_ok']
+  },
+  'pdf_hd_ok': {}
+};
+
+// Notifications par statut -> rôles à notifier
+const notificationRules = {
+  'elements_recus': ['fabricant', 'editeur'],
+  'ok_pour_maquette': ['graphiste'],
+  'maquette_a_valider': ['editeur', 'fabricant', 'auteur'],
+  'maquette_validee_photogravure': ['fabricant'],
+  'en_peaufinage': ['graphiste'],
+  'pour_corrections': ['graphiste'],
+  'en_bat': ['editeur', 'fabricant'],
+  'bat_valide': ['editeur', 'fabricant'],
+  'pdf_hd_ok': ['photograveur']
+};
 
 // Lister toutes les pages d'un projet
 router.get('/project/:projectId', async (req, res) => {
@@ -74,28 +136,29 @@ router.patch('/:id/status', validate(schemas.updatePageStatus), async (req, res)
   const { status } = req.validatedBody;
 
   try {
-    // Récupérer la page actuelle
-    const pageResult = await pool.query('SELECT * FROM pages WHERE id = $1', [id]);
+    // Récupérer la page actuelle avec infos projet
+    const pageResult = await pool.query(
+      `SELECT p.*, pr.title as project_title, pr.id as project_id
+       FROM pages p
+       JOIN projects pr ON p.project_id = pr.id
+       WHERE p.id = $1`,
+      [id]
+    );
     
     if (pageResult.rows.length === 0) {
       return res.status(404).json({ error: { message: 'Page non trouvée' } });
     }
 
     const currentPage = pageResult.rows[0];
+    const currentStatus = currentPage.status;
 
     // Vérifier les transitions autorisées selon le rôle
-    const allowedTransitions = {
-      'auteur': ['elements_recus'],
-      'editeur': ['maquette_a_valider', 'en_corrections', 'bat_valide'],
-      'photograveur': ['maquette_validee_photogravure', 'en_bat'],
-      'fabricant': ['envoye_imprimeur'],
-      'graphiste': ['en_maquette', 'en_peaufinage']
-    };
+    const allowedTransitions = workflowRules[currentStatus]?.[req.user.role] || [];
 
-    if (!allowedTransitions[req.user.role]?.includes(status)) {
+    if (!allowedTransitions.includes(status)) {
       return res.status(403).json({ 
         error: { 
-          message: `Votre rôle (${req.user.role}) ne permet pas de passer à ce statut` 
+          message: `Transition non autorisée: ${currentStatus} → ${status} pour le rôle ${req.user.role}` 
         } 
       });
     }
@@ -110,15 +173,66 @@ router.patch('/:id/status', validate(schemas.updatePageStatus), async (req, res)
     await pool.query(
       `INSERT INTO workflow_history (page_id, from_status, to_status, changed_by, notes)
        VALUES ($1, $2, $3, $4, $5)`,
-      [id, currentPage.status, status, req.user.id, `Changement de statut par ${req.user.role}`]
+      [id, currentStatus, status, req.user.id, `Changement de statut par ${req.user.role}`]
     );
 
     logger.info('Statut de page mis à jour:', { 
       pageId: id, 
-      fromStatus: currentPage.status, 
+      fromStatus: currentStatus, 
       toStatus: status, 
       changedBy: req.user.id 
     });
+
+    // Envoyer les notifications par email
+    const rolesToNotify = notificationRules[status] || [];
+    
+    if (rolesToNotify.length > 0) {
+      // Récupérer les membres du projet avec les rôles concernés
+      const membersResult = await pool.query(
+        `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.role
+         FROM users u
+         JOIN project_members pm ON u.id = pm.user_id
+         WHERE pm.project_id = $1 AND u.role = ANY($2) AND u.is_active = true`,
+        [currentPage.project_id, rolesToNotify]
+      );
+
+      // Récupérer le nom de celui qui a fait le changement
+      const changerResult = await pool.query(
+        `SELECT first_name, last_name, role FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+      const changer = changerResult.rows[0];
+      const changedByName = `${changer.first_name} ${changer.last_name}`;
+
+      // Envoyer les emails en parallèle (sans bloquer la réponse)
+      const frontendUrl = process.env.FRONTEND_URL || 'https://wevalid.rmax.synology.me';
+      
+      for (const member of membersResult.rows) {
+        // Ne pas notifier celui qui a fait le changement
+        if (member.id === req.user.id) continue;
+
+        sendStatusChangeNotification({
+          recipientEmail: member.email,
+          recipientName: `${member.first_name} ${member.last_name}`,
+          projectTitle: currentPage.project_title,
+          pageNumber: currentPage.page_number,
+          fromStatus: currentStatus,
+          toStatus: status,
+          changedByName: changedByName,
+          changedByRole: changer.role,
+          pageUrl: `${frontendUrl}/projects/${currentPage.project_id}/pages/${id}`
+        }).catch(err => {
+          logger.error('Erreur envoi notification:', { error: err.message, to: member.email });
+        });
+      }
+
+      logger.info('Notifications envoyées:', { 
+        pageId: id, 
+        status: status,
+        notifiedRoles: rolesToNotify,
+        notifiedCount: membersResult.rows.filter(m => m.id !== req.user.id).length
+      });
+    }
 
     res.json({
       message: 'Statut mis à jour avec succès',

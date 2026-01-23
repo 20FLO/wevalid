@@ -2,8 +2,8 @@
 
 // Configuration
 const API_URL = 'https://wevalid.rmax.synology.me/api';
-let TOKEN = ''; // À définir
-let PROJECT_ID = 1; // ID du projet à afficher
+let TOKEN = '';
+let PROJECT_ID = 1;
 
 // État
 let project = null;
@@ -19,31 +19,33 @@ const statsGrid = document.getElementById('stats-grid');
 const pagesGrid = document.getElementById('pages-grid');
 const filterButtons = document.querySelectorAll('.filter-btn');
 
-// Mapping des statuts
+// Mapping des statuts (mis à jour)
 const STATUS_LABELS = {
     'attente_elements': 'Attente éléments',
     'elements_recus': 'Éléments reçus',
+    'ok_pour_maquette': 'OK pour maquette',
     'en_maquette': 'En maquette',
     'maquette_a_valider': 'Maquette à valider',
     'maquette_validee_photogravure': 'Validée photogravure',
     'en_peaufinage': 'En peaufinage',
-    'en_corrections': 'En corrections',
+    'pour_corrections': 'Pour corrections',
     'en_bat': 'En BAT',
     'bat_valide': 'BAT validé',
-    'envoye_imprimeur': 'Envoyé imprimeur'
+    'pdf_hd_ok': 'PDF HD OK'
 };
 
 const STATUS_COLORS = {
     'attente_elements': 'red',
     'elements_recus': 'yellow',
+    'ok_pour_maquette': 'orange',
     'en_maquette': 'blue',
     'maquette_a_valider': 'purple',
     'maquette_validee_photogravure': 'green',
-    'en_peaufinage': 'orange',
-    'en_corrections': 'gray',
+    'en_peaufinage': 'cyan',
+    'pour_corrections': 'gray',
     'en_bat': 'brown',
     'bat_valide': 'darkgreen',
-    'envoye_imprimeur': 'darkblue'
+    'pdf_hd_ok': 'darkblue'
 };
 
 // ============================================
@@ -51,7 +53,6 @@ const STATUS_COLORS = {
 // ============================================
 
 async function init() {
-    // Demander le token si non défini
     if (!TOKEN) {
         TOKEN = prompt('Entrez votre token d\'accès JWT:');
         if (!TOKEN) {
@@ -61,21 +62,11 @@ async function init() {
     }
 
     try {
-        // Charger le projet
         await loadProject();
-        
-        // Charger les pages
         await loadPages();
-        
-        // Calculer les stats
         calculateStats();
-        
-        // Afficher
         renderPages();
-        
-        // Event listeners
         setupEventListeners();
-        
         hideLoading();
     } catch (error) {
         hideLoading();
@@ -121,22 +112,19 @@ async function loadPages() {
 // ============================================
 
 function calculateStats() {
-    // Compter par statut
     const stats = {};
     pages.forEach(page => {
         stats[page.status] = (stats[page.status] || 0) + 1;
     });
 
-    // Total pages validées (BAT validé + envoyé imprimeur)
-    const validatedPages = (stats['bat_valide'] || 0) + (stats['envoye_imprimeur'] || 0);
+    // Total pages validées (BAT validé + PDF HD OK)
+    const validatedPages = (stats['bat_valide'] || 0) + (stats['pdf_hd_ok'] || 0);
     const totalPages = pages.length;
     const percentage = Math.round((validatedPages / totalPages) * 100);
 
-    // Mettre à jour la barre de progression
     progressFill.style.width = percentage + '%';
     progressText.textContent = `${validatedPages} / ${totalPages} pages validées (${percentage}%)`;
 
-    // Créer les cartes de stats
     statsGrid.innerHTML = '';
     Object.keys(STATUS_LABELS).forEach(status => {
         const count = stats[status] || 0;
@@ -165,12 +153,10 @@ function renderPages() {
         card.setAttribute('data-status', page.status);
         card.setAttribute('data-page-id', page.id);
         
-        // Vérifier si la page doit être affichée selon le filtre
         if (currentFilter !== 'all' && page.status !== currentFilter) {
             card.classList.add('hidden');
         }
 
-        // Construire le HTML avec miniature
         let thumbnailHTML = '';
         if (page.latest_file_id) {
             thumbnailHTML = `<img class="page-thumbnail" src="${API_URL}/files/thumbnail/${page.latest_file_id}" alt="Page ${page.page_number}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -185,7 +171,6 @@ function renderPages() {
             <div class="page-status">${STATUS_LABELS[page.status]}</div>
         `;
 
-        // Clic sur la page
         card.addEventListener('click', () => {
             openPageViewer(page.id, page.page_number);
         });
@@ -201,16 +186,9 @@ function renderPages() {
 function setupEventListeners() {
     filterButtons.forEach(btn => {
         btn.addEventListener('click', () => {
-            // Retirer active de tous
             filterButtons.forEach(b => b.classList.remove('active'));
-            
-            // Ajouter active au bouton cliqué
             btn.classList.add('active');
-            
-            // Récupérer le filtre
             currentFilter = btn.getAttribute('data-status');
-            
-            // Appliquer le filtre
             applyFilter();
         });
     });
@@ -239,7 +217,6 @@ function applyFilter() {
 // ============================================
 
 function openPageViewer(pageId, pageNumber) {
-    // Rediriger vers le viewer PDF avec les bons paramètres
     window.location.href = `pdf-viewer.html?page=${pageId}&pageNumber=${pageNumber}`;
 }
 

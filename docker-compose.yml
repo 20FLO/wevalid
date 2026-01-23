@@ -60,7 +60,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      SMTP_HOST: ssl.ovh.net
+      SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: 465
       SMTP_SECURE: true
       SMTP_USER: ${SMTP_USER}

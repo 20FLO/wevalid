@@ -59,19 +59,20 @@ const schemas = {
     status: Joi.string().valid('draft', 'in_progress', 'bat', 'completed', 'archived')
   }),
 
-  // Page
+  // Page - Statuts mis à jour
   updatePageStatus: Joi.object({
     status: Joi.string().valid(
       'attente_elements',
       'elements_recus',
+      'ok_pour_maquette',
       'en_maquette',
       'maquette_a_valider',
       'maquette_validee_photogravure',
       'en_peaufinage',
-      'en_corrections',
+      'pour_corrections',
       'en_bat',
       'bat_valide',
-      'envoye_imprimeur'
+      'pdf_hd_ok'
     ).required()
   }),
 
