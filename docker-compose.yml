@@ -80,6 +80,23 @@ services:
     networks:
       - wevalid-network
 
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: wevalid-frontend
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - NEXT_PUBLIC_API_URL=https://wevalid.rmax.synology.me/api
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+    networks:
+      - wevalid-network
+
 networks:
   wevalid-network:
     driver: bridge

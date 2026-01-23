@@ -18,6 +18,12 @@ const PORT = process.env.PORT || 3000;
 // Trust proxy (pour Synology reverse proxy)
 app.set('trust proxy', 1);
 
+// CORS
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
 // Middlewares de sécurité
 app.use(helmet({
   contentSecurityPolicy: false
