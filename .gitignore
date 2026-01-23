@@ -1,0 +1,14 @@
+# Données runtime
+postgres-data/
+redis-data/
+logs/
+storage/
+
+# Environnement
+.env
+.nano
+
+# Divers
+-H
+-d
+node_modules/
