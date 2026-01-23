@@ -6,4 +6,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ghostscript imagemagick python3 make g++ && rm -rf node_modules/bcrypt && npm install && node src/server.js"]
+CMD ["sh", "-c", "apt-get update && apt-get install -y --no-install-recommends ghostscript imagemagick python3 make g++ poppler-utils && rm -rf node_modules/bcrypt && npm install && node src/server.js"]

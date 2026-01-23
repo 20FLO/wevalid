@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WeValid - Test Upload PDF avec Annotations</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; padding: 2rem; }
+    
+    .container { max-width: 800px; margin: 0 auto; }
+    
+    h1 { color: #e94560; margin-bottom: 2rem; }
+    h2 { color: #fff; margin: 2rem 0 1rem; font-size: 1.2rem; }
+    
+    .card { background: #16213e; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; color: #a0a0a0; }
+    .form-group input, .form-group select { width: 100%; padding: 0.75rem; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #fff; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #e94560; }
+    
+    .btn { padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; transition: all 0.2s; }
+    .btn-primary { background: #e94560; color: #fff; }
+    .btn-primary:hover { background: #ff6b6b; }
+    .btn-primary:disabled { background: #666; cursor: not-allowed; }
+    .btn-secondary { background: #0f3460; color: #fff; }
+    .btn-secondary:hover { background: #1a4a7a; }
+    
+    .drop-zone { border: 2px dashed #0f3460; border-radius: 8px; padding: 3rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: #e94560; background: rgba(233, 69, 96, 0.1); }
+    .drop-zone p { color: #a0a0a0; margin-bottom: 0.5rem; }
+    .drop-zone .file-name { color: #00d26a; font-weight: bold; margin-top: 1rem; }
+    
+    .checkbox-group { display: flex; align-items: center; gap: 0.5rem; }
+    .checkbox-group input[type="checkbox"] { width: auto; }
+    
+    .results { background: #0d0d1a; border-radius: 4px; padding: 1rem; margin-top: 1rem; max-height: 400px; overflow-y: auto; }
+    .results pre { white-space: pre-wrap; word-break: break-all; color: #a0a0a0; font-size: 0.85rem; }
+    
+    .success { color: #00d26a; }
+    .error { color: #e94560; }
+    
+    .annotations-list { margin-top: 1rem; }
+    .annotation-item { background: #1a1a2e; padding: 0.75rem; border-radius: 4px; margin-bottom: 0.5rem; border-left: 3px solid #e94560; }
+    .annotation-item .type { font-size: 0.75rem; background: #0f3460; padding: 0.1rem 0.4rem; border-radius: 2px; display: inline-block; }
+    .annotation-item .content { margin-top: 0.5rem; }
+    
+    .status { padding: 1rem; border-radius: 4px; margin-top: 1rem; }
+    .status.loading { background: #0f3460; }
+    .status.success { background: rgba(0, 210, 106, 0.2); border: 1px solid #00d26a; }
+    .status.error { background: rgba(233, 69, 96, 0.2); border: 1px solid #e94560; }
+    
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📤 Test Upload PDF avec Extraction Annotations</h1>
+    
+    <!-- Login -->
+    <div class="card" id="login-card">
+      <h2>1. Connexion</h2>
+      <form id="login-form">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="email" value="admin@wevalid.com">
+        </div>
+        <div class="form-group">
+          <label>Mot de passe</label>
+          <input type="password" id="password" value="admin123">
+        </div>
+        <button type="submit" class="btn btn-primary">Se connecter</button>
+      </form>
+      <div id="login-status" class="status hidden"></div>
+    </div>
+    
+    <!-- Upload -->
+    <div class="card hidden" id="upload-card">
+      <h2>2. Upload PDF annoté</h2>
+      
+      <div class="form-group">
+        <label>Projet</label>
+        <select id="project-select">
+          <option value="">Chargement...</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label>Page</label>
+        <select id="page-select">
+          <option value="">Sélectionner un projet d'abord</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <div class="drop-zone" id="drop-zone">
+          <p>📄 Glissez un PDF ici ou cliquez pour sélectionner</p>
+          <p style="font-size: 0.8rem;">(PDF annoté depuis Acrobat)</p>
+          <div class="file-name hidden" id="file-name"></div>
+        </div>
+        <input type="file" id="file-input" accept=".pdf" style="display: none;">
+      </div>
+      
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="extract-annotations" checked>
+          <label for="extract-annotations">Extraire automatiquement les annotations du PDF</label>
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" id="upload-btn" disabled>Uploader le PDF</button>
+      
+      <div id="upload-status" class="status hidden"></div>
+    </div>
+    
+    <!-- Résultats -->
+    <div class="card hidden" id="results-card">
+      <h2>3. Résultats</h2>
+      
+      <div id="upload-result"></div>
+      
+      <h3 style="margin-top: 1.5rem; color: #a0a0a0;">Annotations de la page :</h3>
+      <div class="annotations-list" id="annotations-list">
+        <p style="color: #666;">Aucune annotation</p>
+      </div>
+      
+      <button class="btn btn-secondary" id="refresh-annotations" style="margin-top: 1rem;">🔄 Rafraîchir les annotations</button>
+    </div>
+    
+    <!-- Debug -->
+    <div class="card">
+      <h2>📋 Logs</h2>
+      <div class="results">
+        <pre id="logs">En attente...</pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let token = localStorage.getItem('wevalid_token');
+    let selectedFile = null;
+    let currentPageId = null;
+    
+    // Logs
+    function log(message, isError = false) {
+      const logs = document.getElementById('logs');
+      const time = new Date().toLocaleTimeString('fr-FR');
+      const prefix = isError ? '❌' : '✅';
+      logs.textContent = `[${time}] ${prefix} ${message}\n` + logs.textContent;
+    }
+    
+    // Login
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      log('Tentative de connexion...');
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+          token = data.accessToken;
+          localStorage.setItem('wevalid_token', token);
+          log(`Connecté en tant que ${data.user.first_name} ${data.user.last_name} (${data.user.role})`);
+          
+          document.getElementById('login-status').className = 'status success';
+          document.getElementById('login-status').textContent = `✅ Connecté : ${data.user.email}`;
+          document.getElementById('login-status').classList.remove('hidden');
+          
+          document.getElementById('upload-card').classList.remove('hidden');
+          loadProjects();
+        } else {
+          throw new Error(data.error?.message || 'Erreur de connexion');
+        }
+      } catch (err) {
+        log(err.message, true);
+        document.getElementById('login-status').className = 'status error';
+        document.getElementById('login-status').textContent = `❌ ${err.message}`;
+        document.getElementById('login-status').classList.remove('hidden');
+      }
+    });
+    
+    // Load projects
+    async function loadProjects() {
+      try {
+        const res = await fetch(`${API_BASE}/api/projects`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        const select = document.getElementById('project-select');
+        select.innerHTML = '<option value="">-- Sélectionner un projet --</option>';
+        data.projects.forEach(p => {
+          select.innerHTML += `<option value="${p.id}">${p.title} (${p.total_pages} pages)</option>`;
+        });
+        
+        log(`${data.projects.length} projets chargés`);
+      } catch (err) {
+        log('Erreur chargement projets: ' + err.message, true);
+      }
+    }
+    
+    // Load pages
+    document.getElementById('project-select').addEventListener('change', async (e) => {
+      const projectId = e.target.value;
+      const pageSelect = document.getElementById('page-select');
+      
+      if (!projectId) {
+        pageSelect.innerHTML = '<option value="">Sélectionner un projet d\'abord</option>';
+        return;
+      }
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/pages/project/${projectId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        pageSelect.innerHTML = '<option value="">-- Sélectionner une page --</option>';
+        data.pages.forEach(p => {
+          pageSelect.innerHTML += `<option value="${p.id}">Page ${p.page_number} - ${p.status}</option>`;
+        });
+        
+        log(`${data.pages.length} pages chargées pour le projet`);
+      } catch (err) {
+        log('Erreur chargement pages: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('page-select').addEventListener('change', (e) => {
+      currentPageId = e.target.value;
+      checkUploadReady();
+    });
+    
+    // File selection
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    
+    dropZone.addEventListener('click', () => fileInput.click());
+    
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length > 0 && files[0].type === 'application/pdf') {
+        selectFile(files[0]);
+      }
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        selectFile(e.target.files[0]);
+      }
+    });
+    
+    function selectFile(file) {
+      selectedFile = file;
+      const fileName = document.getElementById('file-name');
+      fileName.textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} Ko)`;
+      fileName.classList.remove('hidden');
+      log(`Fichier sélectionné: ${file.name}`);
+      checkUploadReady();
+    }
+    
+    function checkUploadReady() {
+      const uploadBtn = document.getElementById('upload-btn');
+      uploadBtn.disabled = !(selectedFile && currentPageId);
+    }
+    
+    // Upload
+    document.getElementById('upload-btn').addEventListener('click', async () => {
+      if (!selectedFile || !currentPageId) return;
+      
+      const uploadBtn = document.getElementById('upload-btn');
+      const uploadStatus = document.getElementById('upload-status');
+      const extractAnnotations = document.getElementById('extract-annotations').checked;
+      
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Upload en cours...';
+      uploadStatus.className = 'status loading';
+      uploadStatus.textContent = '⏳ Upload et extraction en cours...';
+      uploadStatus.classList.remove('hidden');
+      
+      log(`Upload de ${selectedFile.name} vers page ${currentPageId}...`);
+      log(`Extraction annotations: ${extractAnnotations ? 'OUI' : 'NON'}`);
+      
+      const formData = new FormData();
+      formData.append('files', selectedFile);
+      formData.append('page_id', currentPageId);
+      formData.append('extract_annotations', extractAnnotations.toString());
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/files/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+          log(`Upload réussi ! ${data.annotations_extracted || 0} annotations extraites`);
+          
+          uploadStatus.className = 'status success';
+          uploadStatus.textContent = `✅ Upload réussi ! ${data.annotations_extracted || 0} annotations extraites automatiquement`;
+          
+          document.getElementById('results-card').classList.remove('hidden');
+          document.getElementById('upload-result').innerHTML = `
+            <p class="success">✅ Fichier uploadé avec succès</p>
+            <p>Version: ${data.files[0].version}</p>
+            <p>Annotations extraites: <strong>${data.annotations_extracted || 0}</strong></p>
+          `;
+          
+          loadAnnotations();
+        } else {
+          throw new Error(data.error?.message || 'Erreur upload');
+        }
+      } catch (err) {
+        log('Erreur upload: ' + err.message, true);
+        uploadStatus.className = 'status error';
+        uploadStatus.textContent = `❌ ${err.message}`;
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Uploader le PDF';
+      }
+    });
+    
+    // Load annotations
+    async function loadAnnotations() {
+      if (!currentPageId) return;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/annotations/page/${currentPageId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        const list = document.getElementById('annotations-list');
+        
+        if (data.annotations.length === 0) {
+          list.innerHTML = '<p style="color: #666;">Aucune annotation sur cette page</p>';
+        } else {
+          list.innerHTML = data.annotations.map(a => `
+            <div class="annotation-item">
+              <span class="type">${a.type}</span>
+              <strong>${a.author_name}</strong> - ${new Date(a.created_at).toLocaleString('fr-FR')}
+              <div class="content">${a.content}</div>
+            </div>
+          `).join('');
+        }
+        
+        log(`${data.annotations.length} annotations sur cette page`);
+      } catch (err) {
+        log('Erreur chargement annotations: ' + err.message, true);
+      }
+    }
+    
+    document.getElementById('refresh-annotations').addEventListener('click', loadAnnotations);
+    
+    // Auto-login si token existe
+    if (token) {
+      fetch(`${API_BASE}/api/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).then(res => {
+        if (res.ok) {
+          return res.json().then(data => {
+            log(`Session restaurée: ${data.user.email}`);
+            document.getElementById('login-status').className = 'status success';
+            document.getElementById('login-status').textContent = `✅ Connecté : ${data.user.email}`;
+            document.getElementById('login-status').classList.remove('hidden');
+            document.getElementById('upload-card').classList.remove('hidden');
+            loadProjects();
+          });
+        } else {
+          localStorage.removeItem('wevalid_token');
+          token = null;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

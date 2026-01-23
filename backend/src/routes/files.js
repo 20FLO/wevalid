@@ -7,6 +7,7 @@ const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs').promises;
 const sharp = require('sharp');
+const { extractAnnotationsFromPDF } = require('../utils/pdfAnnotations');
 
 // ============================================
 // ENDPOINT PUBLIC - Miniatures (pas d'auth)
@@ -52,7 +53,7 @@ router.use(authenticateToken);
 
 // Upload de fichier(s) pour une page (admin + fabricant + auteurs + éditeurs)
 router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.array('files', 10), async (req, res) => {
-  const { page_id } = req.body;
+  const { page_id, extract_annotations } = req.body;
 
   if (!page_id) {
     return res.status(400).json({ error: { message: 'page_id requis' } });
@@ -73,6 +74,7 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
     }
 
     const uploadedFiles = [];
+    let extractedAnnotationsCount = 0;
 
     for (const file of req.files) {
       await client.query(
@@ -90,6 +92,29 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
       
       if (file.mimetype === 'application/pdf') {
         thumbnailPath = await generatePDFThumbnail(file.path);
+        
+        // Extraire les annotations du PDF si demandé ou par défaut
+        if (extract_annotations !== 'false') {
+          const extractedAnnotations = await extractAnnotationsFromPDF(file.path);
+          
+          for (const annot of extractedAnnotations) {
+            if (annot.content && annot.content.trim()) {
+              await client.query(
+                `INSERT INTO annotations (page_id, type, content, position, color, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                  page_id,
+                  annot.type,
+                  annot.content,
+                  JSON.stringify(annot.position),
+                  annot.color,
+                  req.user.id
+                ]
+              );
+              extractedAnnotationsCount++;
+            }
+          }
+        }
       } else if (file.mimetype.startsWith('image/')) {
         thumbnailPath = await generateImageThumbnail(file.path);
       }
@@ -118,7 +143,8 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
         pageId: page_id, 
         version: nextVersion,
         filename: file.originalname,
-        uploadedBy: req.user.id 
+        uploadedBy: req.user.id,
+        annotationsExtracted: extractedAnnotationsCount
       });
     }
 
@@ -126,7 +152,8 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
 
     res.status(201).json({
       message: 'Fichiers uploadés avec succès',
-      files: uploadedFiles
+      files: uploadedFiles,
+      annotations_extracted: extractedAnnotationsCount
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -140,6 +167,7 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
 // Upload PDF complet avec découpage auto (admin + fabricant + auteurs + éditeurs)
 router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.single('file'), async (req, res) => {
   const project_id = req.body.project_id || req.query.project_id;
+  const extract_annotations = req.body.extract_annotations !== 'false';
 
   if (!project_id) {
     return res.status(400).json({ error: { message: 'project_id requis' } });
@@ -177,7 +205,8 @@ router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur
       project_id, 
       pdfPageCount,
       req.user.id,
-      client
+      client,
+      extract_annotations
     );
 
     await client.query('COMMIT');
@@ -250,10 +279,7 @@ router.delete('/:id', async (req, res) => {
 
     const file = result.rows[0];
 
-    // Admin a tous les droits, sinon vérifier permissions
     if (req.user.role !== 'admin') {
-      // Fabricant et éditeur peuvent supprimer
-      // L'uploader peut supprimer son propre fichier
       if (file.uploaded_by !== req.user.id && 
           req.user.role !== 'editeur' && 
           req.user.role !== 'fabricant') {
@@ -379,7 +405,7 @@ async function countPDFPages(pdfPath) {
   }
 }
 
-async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client) {
+async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client, extractAnnotations = true) {
   try {
     const { exec } = require('child_process');
     const { promisify } = require('util');
@@ -422,6 +448,27 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
 
       const thumbnailPath = await generatePDFThumbnail(outputPath);
       const stats = await fs.stat(outputPath);
+
+      // Extraire les annotations de la page si demandé
+      if (extractAnnotations) {
+        const extractedAnnotations = await extractAnnotationsFromPDF(outputPath);
+        for (const annot of extractedAnnotations) {
+          if (annot.content && annot.content.trim()) {
+            await client.query(
+              `INSERT INTO annotations (page_id, type, content, position, color, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [
+                projectPage.id,
+                annot.type,
+                annot.content,
+                JSON.stringify(annot.position),
+                annot.color,
+                userId
+              ]
+            );
+          }
+        }
+      }
 
       const result = await client.query(
         `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
