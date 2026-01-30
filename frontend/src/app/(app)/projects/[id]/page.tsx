@@ -2,7 +2,7 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useProject, useProjectPages, useWorkflowStats } from '@/hooks/use-projects';
+import { useProject, useProjectPages } from '@/hooks/use-projects';
 import { Header } from '@/components/layout/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
-import { PageStatus, PAGE_STATUS_LABELS, PAGE_STATUS_COLORS } from '@/types';
+import { PageStatus } from '@/types';
 import { ArrowLeft, Users, FileText, Settings, Building2 } from 'lucide-react';
 import { PageThumbnail } from '@/components/projects/page-thumbnail';
 import {
@@ -30,7 +30,6 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
   const { project, isLoading: projectLoading } = useProject(projectId);
   const { pages, isLoading: pagesLoading } = useProjectPages(projectId);
-  const { stats } = useWorkflowStats(projectId);
 
   // Page filtering/sorting state
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
@@ -171,30 +170,6 @@ export default function ProjectPage({ params }: ProjectPageProps) {
             </CardContent>
           </Card>
         </div>
-
-        {/* Workflow Stats */}
-        {stats && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Répartition par statut</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {stats.stats.map((stat) => (
-                  <div
-                    key={stat.status}
-                    className="flex items-center gap-2 rounded-lg border px-3 py-2"
-                  >
-                    <Badge className={PAGE_STATUS_COLORS[stat.status as PageStatus]}>
-                      {stat.count}
-                    </Badge>
-                    <span className="text-sm">{PAGE_STATUS_LABELS[stat.status as PageStatus]}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Tabs */}
         <Tabs defaultValue="pages">
