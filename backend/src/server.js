@@ -30,11 +30,13 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // Permet l'accès aux images/fichiers depuis d'autres origines
 }));
 
-// Rate limiting global
+// Rate limiting global - plus permissif pour le développement
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limite par IP
-  message: 'Trop de requêtes depuis cette IP, veuillez réessayer plus tard.'
+  max: 5000, // limite par IP augmentée
+  message: 'Trop de requêtes depuis cette IP, veuillez réessayer plus tard.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 

@@ -112,6 +112,154 @@ NEXT_PUBLIC_API_URL=https://wevalid.rmax.synology.me/api pnpm dev
 
 ---
 
+## Guide développeur Backend (Claude Desktop / MacOS)
+
+Ce guide est destiné au développeur backend qui travaille depuis **Claude Desktop sur MacOS** en édition directe sur le NAS.
+
+### Configuration de l'accès au NAS
+
+#### 1. Montage du volume NAS
+Connectez-vous au partage SMB depuis le Finder :
+```
+Cmd+K → smb://wevalid.rmax.synology.me
+```
+Le volume sera monté dans `/Volumes/docker/wevalid/` (ou similaire).
+
+#### 2. Configuration SSH
+Ajoutez cette config dans `~/.ssh/config` :
+```
+Host wevalid-nas
+    HostName wevalid.rmax.synology.me
+    User admin
+    IdentityFile ~/.ssh/id_rsa
+```
+Puis connectez-vous avec `ssh wevalid-nas`.
+
+### Lancer le frontend en local
+
+Le frontend est une app **Next.js 14** qui se connecte à l'API backend sur le NAS.
+
+#### 1. Cloner le repo (si pas déjà fait)
+```bash
+cd ~/Projects
+git clone https://github.com/20FLO/wevalid.git
+cd wevalid
+```
+
+#### 2. Installer les dépendances
+```bash
+cd frontend
+pnpm install
+```
+
+#### 3. Configurer les variables d'environnement
+Créez un fichier `.env.local` dans `frontend/` :
+```env
+NEXT_PUBLIC_API_URL=https://wevalid.rmax.synology.me/api
+```
+
+#### 4. Lancer le serveur de développement
+```bash
+pnpm dev
+```
+Le frontend sera accessible sur `http://localhost:3000`.
+
+### Workflow de développement
+
+#### Édition du backend sur le NAS
+1. Modifiez les fichiers backend directement via le volume SMB monté
+2. Ou utilisez SSH + vim/nano pour éditer
+3. Après modification, redémarrez le backend :
+```bash
+# Via SSH
+ssh wevalid-nas
+docker restart wevalid-backend
+docker logs wevalid-backend --tail 50
+
+# Ou via Portainer (interface web Docker)
+```
+
+#### Édition du frontend en local
+1. Modifiez le code dans `frontend/`
+2. Le hot-reload Next.js applique les changements automatiquement
+3. Testez sur `http://localhost:3000`
+4. Commitez et pushez :
+```bash
+git add frontend/
+git commit -m "feat: description"
+git push origin main
+```
+
+### Structure du frontend
+
+```
+frontend/src/
+├── app/                    # Pages (App Router)
+│   ├── (app)/              # Routes authentifiées
+│   │   ├── dashboard/      # Tableau de bord
+│   │   ├── projects/       # Gestion projets
+│   │   ├── publishers/     # Maisons d'édition (admin)
+│   │   └── users/          # Gestion utilisateurs (admin)
+│   ├── (auth)/             # Routes non-auth (login)
+│   └── globals.css         # Styles globaux
+├── components/
+│   ├── layout/             # Header, Sidebar
+│   ├── pdf/                # Visualiseur PDF
+│   ├── projects/           # Composants projets
+│   └── ui/                 # Composants shadcn/ui
+├── hooks/                  # Hooks React custom
+│   └── use-auth.ts         # Gestion authentification
+├── lib/
+│   └── api/                # Clients API
+│       ├── client.ts       # Client HTTP de base
+│       ├── projects.ts     # API projets
+│       ├── users.ts        # API utilisateurs
+│       └── publishers.ts   # API maisons d'édition
+└── types/                  # Types TypeScript
+    └── index.ts
+```
+
+### Technologies frontend
+
+| Techno | Usage |
+|--------|-------|
+| Next.js 14 | Framework React (App Router) |
+| TypeScript | Typage statique |
+| Tailwind CSS | Styles utilitaires |
+| shadcn/ui | Composants UI |
+| react-pdf | Visualisation PDF |
+| sonner | Notifications toast |
+| lucide-react | Icônes |
+
+### Commandes utiles frontend
+
+```bash
+# Développement
+pnpm dev              # Lance le serveur dev (port 3000)
+pnpm build            # Build production
+pnpm lint             # Vérifie le code
+
+# Types
+pnpm tsc --noEmit     # Vérifie les types sans build
+```
+
+### Debug
+
+#### Erreur CORS
+Si vous avez des erreurs CORS, vérifiez que :
+1. L'API backend autorise l'origine `http://localhost:3000`
+2. Le token JWT est bien envoyé dans le header Authorization
+
+#### Erreur d'authentification
+- Tokens stockés dans `localStorage` (`accessToken`, `refreshToken`)
+- Videz le localStorage si problèmes : `localStorage.clear()`
+
+#### PDF ne s'affiche pas
+- Vérifiez que le backend a le header `Cross-Origin-Resource-Policy: cross-origin`
+- Vérifiez le token d'authentification dans la requête fetch
+
+---
+
 ## Déploiement
 
 ```bash
@@ -281,12 +429,32 @@ Maisons d'édition avec contrôle d'accès.
 
 | Route | Méthode | Accès | Description |
 |-------|---------|-------|-------------|
-| `/users` | GET | Éditeur/Fabricant | Liste |
+| `/users` | GET | Éditeur/Fabricant | Liste (filtrable) |
+| `/users` | POST | Admin | Créer utilisateur |
 | `/users/me` | GET | Auth | Mon profil |
 | `/users/:id` | GET | Auth | Profil utilisateur |
+| `/users/:id` | PUT | Admin | Modifier utilisateur |
 | `/users/me` | PUT | Auth | Modifier mon profil |
 | `/users/me/password` | PUT | Auth | Changer mot de passe |
 | `/users/:id/status` | PATCH | Admin | Activer/désactiver |
+| `/users/:id` | DELETE | Admin | Supprimer |
+
+**Query params GET /users :**
+- `role` : Filtrer par rôle
+- `search` : Recherche nom/email
+
+**Body POST /users :**
+```json
+{
+  "email": "user@example.com",
+  "password": "Password123!",
+  "first_name": "John",
+  "last_name": "Doe",
+  "role": "auteur"
+}
+```
+
+**Rôles valides :** `admin`, `editeur`, `fabricant`, `graphiste`, `auteur`, `photograveur`
 
 ---
 

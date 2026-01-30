@@ -154,7 +154,7 @@ export interface Annotation {
   page_id: number;
   type: AnnotationType;
   content: string;
-  position?: AnnotationPosition;
+  position?: AnnotationPosition | string;  // Can be string from database
   color?: string;
   resolved: boolean;
   created_by: number;

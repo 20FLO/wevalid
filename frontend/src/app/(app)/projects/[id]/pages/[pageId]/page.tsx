@@ -45,6 +45,7 @@ import {
   Download,
   Trash2,
   Plus,
+  Highlighter,
 } from 'lucide-react';
 import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus } from '@/types';
 import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS } from '@/types';
@@ -79,7 +80,15 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [showAnnotationDialog, setShowAnnotationDialog] = useState(false);
   const [annotationContent, setAnnotationContent] = useState('');
   const [annotationType, setAnnotationType] = useState<'comment' | 'highlight'>('comment');
-  const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
+  const [annotationData, setAnnotationData] = useState<{
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+    pageNumber: number;
+    selectedText?: string;
+    type: 'click' | 'highlight';
+  } | null>(null);
   const [isSubmittingAnnotation, setIsSubmittingAnnotation] = useState(false);
 
   // Navigation state
@@ -125,34 +134,40 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
   // Handle image click for annotation
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!page) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setClickPosition({ x, y });
+    setAnnotationData({ x, y, pageNumber: page.page_number, type: 'click' });
+    setAnnotationType('comment');
     setShowAnnotationDialog(true);
   };
 
   // Submit annotation
   const handleSubmitAnnotation = async () => {
-    if (!annotationContent.trim() || !clickPosition) return;
+    if (!annotationContent.trim() || !annotationData || !page) return;
 
     setIsSubmittingAnnotation(true);
     try {
       const data: CreateAnnotationData = {
         page_id: pageIdNum,
-        type: annotationType,
+        type: annotationData.type === 'highlight' ? 'highlight' : 'comment',
         content: annotationContent,
         position: {
-          x: clickPosition.x,
-          y: clickPosition.y,
+          x: annotationData.x,
+          y: annotationData.y,
+          width: annotationData.width,
+          height: annotationData.height,
+          page_number: annotationData.pageNumber || page.page_number,
         },
+        color: annotationData.type === 'highlight' ? '#FFFF00' : undefined,
       };
 
       await annotationsApi.create(data);
       toast.success('Annotation ajoutée');
       setShowAnnotationDialog(false);
       setAnnotationContent('');
-      setClickPosition(null);
+      setAnnotationData(null);
       fetchPageData();
     } catch (error) {
       toast.error('Erreur lors de l\'ajout de l\'annotation');
@@ -264,30 +279,9 @@ export default function PageDetailPage({ params }: PageDetailProps) {
         title={`Page ${page.page_number}`}
         description={PAGE_STATUS_LABELS[page.status]}
       >
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={currentIndex <= 0}
-            onClick={() => goToPage(currentIndex - 1)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {currentIndex + 1} / {allPages.length}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={currentIndex >= allPages.length - 1}
-            onClick={() => goToPage(currentIndex + 1)}
-          >
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href={`/projects/${projectId}`}>Retour au projet</Link>
-          </Button>
-        </div>
+        <Button variant="outline" asChild>
+          <Link href={`/projects/${projectId}`}>Retour au projet</Link>
+        </Button>
       </Header>
 
       <main className="flex-1 p-6">
@@ -301,9 +295,16 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                   <PDFViewer
                     url={pdfUrl}
                     annotations={annotations}
-                    onPageClick={(pos) => {
-                      setClickPosition({ x: pos.x, y: pos.y });
+                    onAnnotate={(data) => {
+                      setAnnotationData(data);
+                      setAnnotationType(data.type === 'highlight' ? 'highlight' : 'comment');
+                      if (data.selectedText) {
+                        setAnnotationContent(data.selectedText);
+                      }
                       setShowAnnotationDialog(true);
+                    }}
+                    onAnnotationClick={(annotation) => {
+                      toast.info(`Annotation: ${annotation.content.substring(0, 50)}...`);
                     }}
                     className="min-h-[600px]"
                   />
@@ -328,21 +329,26 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       )}
 
                       {/* Annotation markers */}
-                      {annotations.map((annotation) =>
-                        annotation.position ? (
+                      {annotations.map((annotation, index) => {
+                        const pos = typeof annotation.position === 'string'
+                          ? JSON.parse(annotation.position)
+                          : annotation.position;
+                        if (!pos) return null;
+
+                        return (
                           <div
                             key={annotation.id}
-                            className="absolute w-6 h-6 -ml-3 -mt-3 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold cursor-pointer hover:scale-110 transition-transform"
+                            className="absolute w-8 h-8 -ml-4 -mt-4 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold cursor-pointer hover:scale-125 transition-transform shadow-lg border-2 border-white z-50"
                             style={{
-                              left: `${annotation.position.x}%`,
-                              top: `${annotation.position.y}%`,
+                              left: `${pos.x}%`,
+                              top: `${pos.y}%`,
                             }}
                             title={annotation.content}
                           >
-                            {annotation.resolved ? '✓' : annotations.indexOf(annotation) + 1}
+                            {annotation.resolved ? '✓' : index + 1}
                           </div>
-                        ) : null
-                      )}
+                        );
+                      })}
                     </div>
 
                     <p className="text-xs text-muted-foreground p-2 text-center">
@@ -350,6 +356,53 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     </p>
                   </>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Navigation between project pages */}
+            <Card className="bg-muted/50">
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    onClick={() => goToPage(currentIndex - 1)}
+                    disabled={currentIndex <= 0}
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Page précédente
+                  </Button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">
+                      Page {page.page_number} sur {allPages.length}
+                    </span>
+                    <Select
+                      value={pageIdNum.toString()}
+                      onValueChange={(value) => {
+                        const idx = allPages.findIndex((p) => p.id === parseInt(value));
+                        if (idx >= 0) goToPage(idx);
+                      }}
+                    >
+                      <SelectTrigger className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allPages.map((p) => (
+                          <SelectItem key={p.id} value={p.id.toString()}>
+                            Page {p.page_number}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => goToPage(currentIndex + 1)}
+                    disabled={currentIndex >= allPages.length - 1}
+                  >
+                    Page suivante
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
@@ -442,8 +495,12 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       <CardContent className="p-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                              {index + 1}
+                            <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                              annotation.type === 'highlight'
+                                ? 'bg-yellow-400 text-yellow-900'
+                                : 'bg-red-500 text-white'
+                            }`}>
+                              {annotation.type === 'highlight' ? <Highlighter className="h-3 w-3" /> : index + 1}
                             </span>
                             <div>
                               <p className="text-sm font-medium">
@@ -476,11 +533,18 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                           </div>
                         </div>
                         <p className="mt-2 text-sm">{annotation.content}</p>
-                        {annotation.resolved && (
-                          <Badge variant="outline" className="mt-2 text-xs">
-                            Résolu
-                          </Badge>
-                        )}
+                        <div className="flex gap-2 mt-2">
+                          {annotation.type === 'highlight' && (
+                            <Badge variant="outline" className="text-xs bg-yellow-100">
+                              Surlignage
+                            </Badge>
+                          )}
+                          {annotation.resolved && (
+                            <Badge variant="outline" className="text-xs text-green-600">
+                              Résolu
+                            </Badge>
+                          )}
+                        </div>
                       </CardContent>
                     </Card>
                   ))
@@ -490,7 +554,9 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                   variant="outline"
                   className="w-full"
                   onClick={() => {
-                    setClickPosition({ x: 50, y: 50 });
+                    if (!page) return;
+                    setAnnotationData({ x: 50, y: 50, pageNumber: page.page_number, type: 'click' });
+                    setAnnotationType('comment');
                     setShowAnnotationDialog(true);
                   }}
                 >
@@ -537,31 +603,20 @@ export default function PageDetailPage({ params }: PageDetailProps) {
       <Dialog open={showAnnotationDialog} onOpenChange={setShowAnnotationDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ajouter une annotation</DialogTitle>
+            <DialogTitle>
+              {annotationData?.type === 'highlight' ? 'Ajouter un surlignage' : 'Ajouter un commentaire'}
+            </DialogTitle>
             <DialogDescription>
-              Ajoutez un commentaire ou une remarque sur cette page.
+              {annotationData?.type === 'highlight' && annotationData.selectedText
+                ? `Texte sélectionné : "${annotationData.selectedText.substring(0, 100)}${annotationData.selectedText.length > 100 ? '...' : ''}"`
+                : 'Ajoutez un commentaire sur cette page.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select
-                value={annotationType}
-                onValueChange={(v) => setAnnotationType(v as 'comment' | 'highlight')}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="comment">Commentaire</SelectItem>
-                  <SelectItem value="highlight">Surlignage</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Contenu</Label>
+              <Label>{annotationData?.type === 'highlight' ? 'Note (optionnel)' : 'Commentaire'}</Label>
               <Textarea
-                placeholder="Votre annotation..."
+                placeholder={annotationData?.type === 'highlight' ? 'Ajouter une note au surlignage...' : 'Votre commentaire...'}
                 value={annotationContent}
                 onChange={(e) => setAnnotationContent(e.target.value)}
                 rows={4}
