@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { Loader2, FileText, Image, X, Upload, Users, UserPlus } from 'lucide-react';
-import type { Publisher, User } from '@/types';
+import type { Publisher, User, PublisherMember } from '@/types';
 
 // Predefined book formats
 const BOOK_FORMATS = [
@@ -79,8 +79,8 @@ export function CreateProjectDialog({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
-  // Users state
-  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  // Users state (PublisherMember for members from a publisher)
+  const [availableUsers, setAvailableUsers] = useState<PublisherMember[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
@@ -114,10 +114,10 @@ export function CreateProjectDialog({
       .then((response) => {
         // Filter: exclude current user, exclude graphistes
         const members = response.publisher.members || [];
-        const filtered = members.filter((m: { id: number; role: string }) =>
+        const filtered = members.filter((m: PublisherMember) =>
           m.id !== user?.id && m.role !== 'graphiste'
         );
-        setAvailableUsers(filtered as User[]);
+        setAvailableUsers(filtered);
       })
       .catch((error) => {
         console.error('Failed to load publisher members:', error);
