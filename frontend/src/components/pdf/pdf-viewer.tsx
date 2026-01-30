@@ -43,6 +43,7 @@ interface PDFViewerProps {
   onAnnotationClick?: (annotation: Annotation) => void;
   onAnnotate?: (data: AnnotationData) => void;
   className?: string;
+  highlightedAnnotationId?: number | null; // ID of annotation to highlight/flash
 }
 
 export function PDFViewer({
@@ -51,6 +52,7 @@ export function PDFViewer({
   onAnnotationClick,
   onAnnotate,
   className,
+  highlightedAnnotationId,
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageContainerRef = useRef<HTMLDivElement>(null);
@@ -324,14 +326,17 @@ export function PDFViewer({
                     pos.width !== undefined && pos.width > 0 &&
                     pos.height !== undefined && pos.height > 0;
 
+                  const isHighlighted = highlightedAnnotationId === annotation.id;
+
                   // Highlight annotation (rectangle overlay)
                   if (isHighlight) {
                     return (
                       <div
                         key={annotation.id}
                         className={cn(
-                          'absolute pointer-events-auto cursor-pointer',
-                          annotation.resolved ? 'opacity-30' : 'opacity-60 hover:opacity-80'
+                          'absolute pointer-events-auto cursor-pointer transition-all duration-300',
+                          annotation.resolved ? 'opacity-30' : 'opacity-60 hover:opacity-80',
+                          isHighlighted && 'animate-pulse ring-4 ring-blue-500 ring-offset-2'
                         )}
                         style={{
                           left: `${pos.x}%`,
@@ -339,7 +344,7 @@ export function PDFViewer({
                           width: `${pos.width}%`,
                           height: `${pos.height}%`,
                           backgroundColor: annotation.color || '#FFFF00',
-                          zIndex: 50,
+                          zIndex: isHighlighted ? 150 : 50,
                           mixBlendMode: 'multiply',
                         }}
                         onClick={(e) => {
@@ -355,16 +360,20 @@ export function PDFViewer({
                   return (
                     <div
                       key={annotation.id}
+                      data-annotation-id={annotation.id}
                       className={cn(
-                        'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer hover:scale-125 transition-transform shadow-lg border-2 border-white pointer-events-auto',
+                        'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer transition-all shadow-lg border-2 pointer-events-auto',
                         annotation.resolved
-                          ? 'bg-green-500 text-white'
-                          : 'bg-red-500 text-white'
+                          ? 'bg-green-500 text-white border-white'
+                          : 'bg-red-500 text-white border-white',
+                        isHighlighted
+                          ? 'scale-150 ring-4 ring-blue-500 ring-offset-2 animate-bounce z-[200]'
+                          : 'hover:scale-125'
                       )}
                       style={{
                         left: `${pos.x}%`,
                         top: `${pos.y}%`,
-                        zIndex: 100,
+                        zIndex: isHighlighted ? 200 : 100,
                       }}
                       onClick={(e) => {
                         e.stopPropagation();

@@ -98,6 +98,9 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [allPages, setAllPages] = useState<Page[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
 
+  // Annotation highlighting state (for syncing PDF markers with list)
+  const [highlightedAnnotationId, setHighlightedAnnotationId] = useState<number | null>(null);
+
   // Fetch page data
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
@@ -343,6 +346,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                   <PDFViewer
                     url={pdfUrl}
                     annotations={annotations}
+                    highlightedAnnotationId={highlightedAnnotationId}
                     onAnnotate={(data) => {
                       // Block annotations on locked pages
                       if (isLocked && !isAdmin) {
@@ -357,7 +361,10 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       setShowAnnotationDialog(true);
                     }}
                     onAnnotationClick={(annotation) => {
-                      toast.info(`Annotation: ${annotation.content.substring(0, 50)}...`);
+                      // Highlight the clicked annotation in the list
+                      setHighlightedAnnotationId(annotation.id);
+                      // Auto-clear after 2 seconds
+                      setTimeout(() => setHighlightedAnnotationId(null), 2000);
                     }}
                     className="min-h-[600px]"
                   />
@@ -382,23 +389,37 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       )}
 
                       {/* Annotation markers */}
-                      {annotations.map((annotation, index) => {
+                      {annotations.map((annotation) => {
                         const pos = typeof annotation.position === 'string'
                           ? JSON.parse(annotation.position)
                           : annotation.position;
                         if (!pos) return null;
 
+                        // Calculate global index for comment annotations (non-highlight)
+                        const commentAnnotations = annotations.filter(a => a.type !== 'highlight');
+                        const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
+                        const isHighlighted = highlightedAnnotationId === annotation.id;
+
                         return (
                           <div
                             key={annotation.id}
-                            className="absolute w-8 h-8 -ml-4 -mt-4 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold cursor-pointer hover:scale-125 transition-transform shadow-lg border-2 border-white z-50"
+                            className={cn(
+                              'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer transition-all shadow-lg border-2 border-white z-50',
+                              annotation.resolved ? 'bg-green-500 text-white' : 'bg-red-500 text-white',
+                              isHighlighted ? 'scale-150 ring-4 ring-blue-500 animate-bounce' : 'hover:scale-125'
+                            )}
                             style={{
                               left: `${pos.x}%`,
                               top: `${pos.y}%`,
                             }}
                             title={annotation.content}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedAnnotationId(annotation.id);
+                              setTimeout(() => setHighlightedAnnotationId(null), 2000);
+                            }}
                           >
-                            {annotation.resolved ? '✓' : index + 1}
+                            {annotation.resolved ? '✓' : globalIndex}
                           </div>
                         );
                       })}
@@ -574,8 +595,27 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     Aucune annotation
                   </p>
                 ) : (
-                  annotations.map((annotation, index) => (
-                    <Card key={annotation.id} className={annotation.resolved ? 'opacity-60' : ''}>
+                  annotations.map((annotation) => {
+                    // Calculate global index for comment annotations (non-highlight)
+                    const commentAnnotations = annotations.filter(a => a.type !== 'highlight');
+                    const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
+                    const isHighlighted = highlightedAnnotationId === annotation.id;
+
+                    return (
+                    <Card
+                      key={annotation.id}
+                      className={cn(
+                        'cursor-pointer transition-all duration-300',
+                        annotation.resolved ? 'opacity-60' : '',
+                        isHighlighted && 'ring-2 ring-blue-500 bg-blue-50 animate-pulse'
+                      )}
+                      onClick={() => {
+                        // Highlight the corresponding marker on the PDF
+                        setHighlightedAnnotationId(annotation.id);
+                        // Auto-clear after 2 seconds
+                        setTimeout(() => setHighlightedAnnotationId(null), 2000);
+                      }}
+                    >
                       <CardContent className="p-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
@@ -584,7 +624,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                                 ? 'bg-yellow-400 text-yellow-900'
                                 : 'bg-red-500 text-white'
                             }`}>
-                              {annotation.type === 'highlight' ? <Highlighter className="h-3 w-3" /> : index + 1}
+                              {annotation.type === 'highlight' ? <Highlighter className="h-3 w-3" /> : globalIndex}
                             </span>
                             <div>
                               <p className="text-sm font-medium">
@@ -601,7 +641,10 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
-                                onClick={() => handleResolveAnnotation(annotation.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleResolveAnnotation(annotation.id);
+                                }}
                               >
                                 <CheckCircle2 className="h-4 w-4" />
                               </Button>
@@ -610,7 +653,10 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-destructive"
-                              onClick={() => handleDeleteAnnotation(annotation.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteAnnotation(annotation.id);
+                              }}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -631,7 +677,8 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         </div>
                       </CardContent>
                     </Card>
-                  ))
+                  );
+                  })
                 )}
 
                 <Button
