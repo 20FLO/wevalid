@@ -1,7 +1,7 @@
 // Services pour les projets
 
 import apiClient from './client';
-import type { Project, Page, WorkflowStats, WorkflowHistory } from '@/types';
+import type { Project, Page, WorkflowStats, WorkflowHistory, ProjectDashboard } from '@/types';
 
 export interface ProjectsResponse {
   projects: Project[];
@@ -95,5 +95,10 @@ export const projectsApi = {
 
   async getAllowedTransitions(status: string): Promise<{ current_status: string; user_role: string; allowed_transitions: string[] }> {
     return apiClient.get(`/workflows/transitions/${status}`);
+  },
+
+  // Dashboard projet
+  async getDashboard(projectId: number): Promise<ProjectDashboard> {
+    return apiClient.get(`/workflows/dashboard/${projectId}`);
   },
 };

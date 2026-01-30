@@ -200,3 +200,52 @@ export interface ApiError {
   error: string;
   message?: string;
 }
+
+// Fichiers projet
+export type FileCategory = 'document' | 'image' | 'reference' | 'other';
+
+export interface ProjectFile {
+  id: number;
+  project_id: number;
+  filename: string;
+  original_filename: string;
+  file_path: string;
+  file_type: string;
+  file_size: number;
+  category: FileCategory;
+  description?: string;
+  version: number;
+  parent_file_id?: number;
+  uploaded_by: number;
+  uploader_name?: string;
+  uploaded_at: string;
+  updated_at: string;
+  versions_count?: number;
+}
+
+// Dashboard projet
+export interface ProjectDashboard {
+  project_id: number;
+  project_title: string;
+  total_pages: number;
+  pages_created: number;
+  pages_by_status: Record<string, number>;
+  progress: {
+    maquette_count: number;
+    maquette_percent: number;
+    validation_count: number;
+    validation_percent: number;
+  };
+  files_count: number;
+  recent_activity: {
+    id: number;
+    from_status: PageStatus;
+    to_status: PageStatus;
+    from_status_label: string;
+    to_status_label: string;
+    changed_at: string;
+    notes?: string;
+    page_number: number;
+    changed_by_name: string;
+  }[];
+}

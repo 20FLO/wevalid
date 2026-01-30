@@ -178,7 +178,102 @@ router.get('/history/:projectId', async (req, res) => {
   }
 });
 
-module.exports = router;
+// Dashboard projet - stats détaillées
+router.get('/dashboard/:projectId', async (req, res) => {
+  const { projectId } = req.params;
+
+  try {
+    // Infos projet
+    const projectResult = await pool.query(
+      'SELECT * FROM projects WHERE id = $1',
+      [projectId]
+    );
+
+    if (projectResult.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Projet non trouvé' } });
+    }
+
+    const project = projectResult.rows[0];
+
+    // Stats pages par statut
+    const pageStats = await pool.query(`
+      SELECT status, COUNT(*) as count
+      FROM pages
+      WHERE project_id = $1
+      GROUP BY status
+    `, [projectId]);
+
+    // Convertir en objet
+    const pagesByStatus = {};
+    let totalPagesCreated = 0;
+    pageStats.rows.forEach(row => {
+      pagesByStatus[row.status] = parseInt(row.count);
+      totalPagesCreated += parseInt(row.count);
+    });
+
+    // Calculer les progressions
+    const inMaquette = (pagesByStatus['en_maquette'] || 0) +
+                       (pagesByStatus['maquette_a_valider'] || 0) +
+                       (pagesByStatus['maquette_validee_photogravure'] || 0) +
+                       (pagesByStatus['en_peaufinage'] || 0) +
+                       (pagesByStatus['en_corrections'] || 0) +
+                       (pagesByStatus['en_bat'] || 0) +
+                       (pagesByStatus['bat_valide'] || 0) +
+                       (pagesByStatus['envoye_imprimeur'] || 0);
+
+    const validated = (pagesByStatus['bat_valide'] || 0) +
+                      (pagesByStatus['envoye_imprimeur'] || 0);
+
+    const totalPages = project.total_pages || totalPagesCreated;
+
+    // Fichiers projet
+    const filesResult = await pool.query(
+      'SELECT COUNT(*) as count FROM project_files WHERE project_id = $1',
+      [projectId]
+    );
+
+    // Activité récente
+    const activityResult = await pool.query(`
+      SELECT
+        wh.id,
+        wh.from_status,
+        wh.to_status,
+        wh.changed_at,
+        wh.notes,
+        p.page_number,
+        u.first_name || ' ' || u.last_name as changed_by_name
+      FROM workflow_history wh
+      JOIN pages p ON wh.page_id = p.id
+      JOIN users u ON wh.changed_by = u.id
+      WHERE p.project_id = $1
+      ORDER BY wh.changed_at DESC
+      LIMIT 10
+    `, [projectId]);
+
+    res.json({
+      project_id: parseInt(projectId),
+      project_title: project.title,
+      total_pages: totalPages,
+      pages_created: totalPagesCreated,
+      pages_by_status: pagesByStatus,
+      progress: {
+        maquette_count: inMaquette,
+        maquette_percent: totalPages > 0 ? Math.round((inMaquette / totalPages) * 100) : 0,
+        validation_count: validated,
+        validation_percent: totalPages > 0 ? Math.round((validated / totalPages) * 100) : 0
+      },
+      files_count: parseInt(filesResult.rows[0].count),
+      recent_activity: activityResult.rows.map(a => ({
+        ...a,
+        from_status_label: statusLabels[a.from_status] || a.from_status,
+        to_status_label: statusLabels[a.to_status] || a.to_status
+      }))
+    });
+  } catch (error) {
+    logger.error('Erreur dashboard projet:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
 
 // Dashboard global - stats tous projets
 router.get('/dashboard/overview', async (req, res) => {
@@ -264,8 +359,8 @@ router.get('/dashboard/overview', async (req, res) => {
       recent_activity: recentActivity.rows,
       projects_progress: projectsProgress.rows.map(p => ({
         ...p,
-        progress_percent: p.total_pages > 0 
-          ? Math.round((p.validated_pages / p.total_pages) * 100) 
+        progress_percent: p.total_pages > 0
+          ? Math.round((p.validated_pages / p.total_pages) * 100)
           : 0
       }))
     });
@@ -274,3 +369,5 @@ router.get('/dashboard/overview', async (req, res) => {
     res.status(500).json({ error: { message: 'Erreur serveur' } });
   }
 });
+
+module.exports = router;

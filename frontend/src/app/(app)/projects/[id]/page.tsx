@@ -1,8 +1,10 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useProject, useProjectPages } from '@/hooks/use-projects';
+import { projectsApi } from '@/lib/api/projects';
+import { projectFilesApi } from '@/lib/api/project-files';
 import { Header } from '@/components/layout/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,9 +12,11 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
-import { PageStatus } from '@/types';
-import { ArrowLeft, Users, FileText, Settings, Building2 } from 'lucide-react';
+import { PageStatus, ProjectFile, ProjectDashboard as DashboardData } from '@/types';
+import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen } from 'lucide-react';
 import { PageThumbnail } from '@/components/projects/page-thumbnail';
+import { ProjectFilesTab } from '@/components/projects/project-files-tab';
+import { ProjectDashboard } from '@/components/projects/project-dashboard';
 import {
   PageFilters,
   useFilteredPages,
@@ -35,6 +39,56 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
   const [sortField, setSortField] = useState<SortField>('page_number');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  // Dashboard and files state
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // Fetch dashboard data
+  const fetchDashboard = useCallback(async () => {
+    setDashboardLoading(true);
+    try {
+      const data = await projectsApi.getDashboard(projectId);
+      setDashboard(data);
+    } catch (error) {
+      console.error('Error fetching dashboard:', error);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [projectId]);
+
+  // Fetch project files
+  const fetchFiles = useCallback(async () => {
+    setFilesLoading(true);
+    try {
+      const data = await projectFilesApi.getAll(projectId);
+      setProjectFiles(data.files);
+    } catch (error) {
+      console.error('Error fetching files:', error);
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [projectId]);
+
+  // Load data when tab changes
+  useEffect(() => {
+    if (activeTab === 'dashboard' && !dashboard && !dashboardLoading) {
+      fetchDashboard();
+    }
+    if (activeTab === 'files' && projectFiles.length === 0 && !filesLoading) {
+      fetchFiles();
+    }
+  }, [activeTab, dashboard, dashboardLoading, projectFiles.length, filesLoading, fetchDashboard, fetchFiles]);
+
+  // Initial load dashboard
+  useEffect(() => {
+    if (project && !dashboard) {
+      fetchDashboard();
+    }
+  }, [project, dashboard, fetchDashboard]);
 
   // Apply filters and sorting
   const filteredPages = useFilteredPages(pages, statusFilter, sortField, sortDirection);
@@ -172,8 +226,16 @@ export default function ProjectPage({ params }: ProjectPageProps) {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="pages">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
+            <TabsTrigger value="dashboard">
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              Vue d&apos;ensemble
+            </TabsTrigger>
+            <TabsTrigger value="files">
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Fichiers ({projectFiles.length})
+            </TabsTrigger>
             <TabsTrigger value="pages">
               <FileText className="mr-2 h-4 w-4" />
               Pages ({pages.length})
@@ -187,6 +249,21 @@ export default function ProjectPage({ params }: ProjectPageProps) {
               Paramètres
             </TabsTrigger>
           </TabsList>
+
+          {/* Dashboard Tab */}
+          <TabsContent value="dashboard" className="mt-4">
+            <ProjectDashboard data={dashboard} isLoading={dashboardLoading} />
+          </TabsContent>
+
+          {/* Files Tab */}
+          <TabsContent value="files" className="mt-4">
+            <ProjectFilesTab
+              projectId={projectId}
+              files={projectFiles}
+              onRefresh={fetchFiles}
+              isLoading={filesLoading}
+            />
+          </TabsContent>
 
           <TabsContent value="pages" className="mt-4 space-y-4">
             {/* Filters */}

@@ -71,6 +71,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/workflows', require('./routes/workflows'));
 app.use('/api/annotations', require('./routes/annotations'));
 app.use('/api/publishers', require('./routes/publishers'));
+app.use('/api/project-files', require('./routes/project-files'));
 
 // Gestion des erreurs 404
 app.use((req, res) => {
