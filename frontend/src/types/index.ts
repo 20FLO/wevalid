@@ -151,7 +151,7 @@ export interface FileItem {
   uploaded_at: string;
 }
 
-export type AnnotationType = 'comment' | 'highlight' | 'drawing' | 'stamp';
+export type AnnotationType = 'comment' | 'highlight' | 'drawing' | 'stamp' | 'ink';
 
 export interface AnnotationPosition {
   x: number;
@@ -159,6 +159,7 @@ export interface AnnotationPosition {
   width?: number;
   height?: number;
   page_number?: number;
+  ink_path?: string; // SVG path for freehand drawings
 }
 
 export interface Annotation {

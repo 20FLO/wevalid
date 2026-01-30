@@ -92,7 +92,8 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     height?: number;
     pageNumber: number;
     selectedText?: string;
-    type: 'click' | 'highlight';
+    type: 'click' | 'highlight' | 'ink';
+    inkPath?: string;
   } | null>(null);
   const [isSubmittingAnnotation, setIsSubmittingAnnotation] = useState(false);
 
@@ -158,22 +159,31 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
   // Submit annotation
   const handleSubmitAnnotation = async () => {
-    if (!annotationContent.trim() || !annotationData || !page) return;
+    if (!annotationData || !page) return;
+    // For ink annotations, content is optional
+    if (annotationData.type !== 'ink' && !annotationContent.trim()) return;
 
     setIsSubmittingAnnotation(true);
     try {
+      // Determine annotation type
+      let annotType: 'comment' | 'highlight' | 'ink' = 'comment';
+      if (annotationData.type === 'highlight') annotType = 'highlight';
+      else if (annotationData.type === 'ink') annotType = 'ink';
+
       const data: CreateAnnotationData = {
         page_id: pageIdNum,
-        type: annotationData.type === 'highlight' ? 'highlight' : 'comment',
-        content: annotationContent,
+        type: annotType,
+        content: annotationContent || (annotType === 'ink' ? 'Dessin' : ''),
         position: {
           x: annotationData.x,
           y: annotationData.y,
           width: annotationData.width,
           height: annotationData.height,
           page_number: annotationData.pageNumber || page.page_number,
+          ink_path: annotationData.inkPath,
         },
-        color: annotationData.type === 'highlight' ? '#FFFF00' : undefined,
+        color: annotationData.type === 'highlight' ? '#FFFF00' :
+               annotationData.type === 'ink' ? '#FF0000' : undefined,
       };
 
       await annotationsApi.create(data);
@@ -349,12 +359,38 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     url={pdfUrl}
                     annotations={annotations}
                     highlightedAnnotationId={highlightedAnnotationId}
-                    onAnnotate={(data) => {
+                    onAnnotate={async (data) => {
                       // Block annotations on locked pages
                       if (isLocked && !isAdmin) {
                         toast.error('Cette page est verrouillée. Annotations désactivées.');
                         return;
                       }
+
+                      // For ink annotations, save directly without dialog
+                      if (data.type === 'ink' && data.inkPath) {
+                        try {
+                          await annotationsApi.create({
+                            page_id: pageIdNum,
+                            type: 'ink',
+                            content: 'Dessin',
+                            position: {
+                              x: data.x,
+                              y: data.y,
+                              width: data.width,
+                              height: data.height,
+                              page_number: data.pageNumber,
+                              ink_path: data.inkPath,
+                            },
+                            color: '#FF0000',
+                          });
+                          toast.success('Dessin enregistré');
+                          fetchPageData();
+                        } catch {
+                          toast.error('Erreur lors de l\'enregistrement');
+                        }
+                        return;
+                      }
+
                       setAnnotationData(data);
                       setAnnotationType(data.type === 'highlight' ? 'highlight' : 'comment');
                       if (data.selectedText) {
@@ -537,6 +573,58 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                   </a>
                 </Button>
               )}
+              {/* XFDF Export/Import for Acrobat compatibility */}
+              {annotations.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const token = localStorage.getItem('accessToken');
+                    const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7801/api'}/annotations/page/${pageIdNum}/export-xfdf`;
+                    // Download via fetch with auth
+                    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+                      .then(res => res.text())
+                      .then(xfdf => {
+                        const blob = new Blob([xfdf], { type: 'application/vnd.adobe.xfdf' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `annotations_page_${page.page_number}.xfdf`;
+                        a.click();
+                      })
+                      .catch(() => toast.error('Erreur export XFDF'));
+                  }}
+                  title="Exporter pour Acrobat"
+                >
+                  <FileText className="mr-1 h-3 w-3" />
+                  Export XFDF
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = '.xfdf';
+                  input.onchange = async (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (!file) return;
+                    try {
+                      const xfdf = await file.text();
+                      await annotationsApi.importXfdf(pageIdNum, xfdf);
+                      toast.success('Annotations importées');
+                      fetchPageData();
+                    } catch {
+                      toast.error('Erreur import XFDF');
+                    }
+                  };
+                  input.click();
+                }}
+                title="Importer depuis Acrobat"
+              >
+                <Upload className="mr-1 h-3 w-3" />
+                Import XFDF
+              </Button>
             </div>
           </div>
 
