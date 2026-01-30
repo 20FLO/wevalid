@@ -6,9 +6,32 @@ storage/
 
 # Environnement
 .env
-.nano
+.env.local
+.env.*.backup
+*.backup
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build Next.js
+.next/
+out/
+
+# Build TypeScript
+*.tsbuildinfo
+dist/
+
+# Dependencies
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Divers
 -H
 -d
-node_modules/
+.nano
