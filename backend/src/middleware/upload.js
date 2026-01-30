@@ -1,7 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
-const { sanitizeFilename } = require('../utils/sanitize');
+const { processFilename } = require('../utils/sanitize');
 
 // Configuration du stockage
 const storage = multer.diskStorage({
@@ -10,8 +10,10 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = crypto.randomBytes(16).toString('hex');
-    const sanitized = sanitizeFilename(file.originalname);
-    cb(null, `${Date.now()}-${uniqueSuffix}_${sanitized}`);
+    // Check query param for sanitize option (default: true)
+    const shouldSanitize = req.query.sanitize_filename !== 'false';
+    const processed = processFilename(file.originalname, shouldSanitize);
+    cb(null, `${Date.now()}-${uniqueSuffix}_${processed}`);
   }
 });
 

@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { PageStatus, ProjectFile, ProjectDashboard as DashboardData } from '@/types';
 import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen, Upload, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -45,6 +46,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   // PDF upload state
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   const [uploadStartPage, setUploadStartPage] = useState<string>('');
+  const [sanitizeFilename, setSanitizeFilename] = useState(true);
 
   // Page filtering/sorting state
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
@@ -117,7 +119,9 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     setIsUploadingPdf(true);
     try {
       const startPage = uploadStartPage ? parseInt(uploadStartPage) : undefined;
-      const result = await filesApi.uploadCompletePdf(projectId, file, startPage);
+      const result = await filesApi.uploadCompletePdf(projectId, file, startPage, {
+        sanitizeFilename,
+      });
       toast.success(`PDF découpé en ${result.stats.files_created} pages`);
       // Refresh pages list
       refreshPages();
@@ -318,7 +322,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
                       Le PDF sera découpé page par page et assigné aux pages du projet
                     </p>
                   </div>
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-end gap-3">
                     <div className="w-24">
                       <Label htmlFor="start-page" className="text-xs">Page départ</Label>
                       <Input
@@ -330,6 +334,16 @@ export default function ProjectPage({ params }: ProjectPageProps) {
                         onChange={(e) => setUploadStartPage(e.target.value)}
                         className="h-9"
                       />
+                    </div>
+                    <div className="flex items-center gap-2 pb-1">
+                      <Checkbox
+                        id="sanitize-filename"
+                        checked={sanitizeFilename}
+                        onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
+                      />
+                      <Label htmlFor="sanitize-filename" className="text-xs cursor-pointer">
+                        Simplifier noms
+                      </Label>
                     </div>
                     <Button
                       variant="outline"

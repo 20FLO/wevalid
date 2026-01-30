@@ -1,6 +1,6 @@
 /**
  * Sanitize filename to only allow: uppercase, lowercase, underscore, numbers
- * No accents, spaces, or special characters
+ * No accents, spaces, or special characters (full sanitization)
  */
 function sanitizeFilename(filename) {
   if (!filename) return 'file';
@@ -28,4 +28,33 @@ function sanitizeFilename(filename) {
   return finalName + sanitizedExt;
 }
 
-module.exports = { sanitizeFilename };
+/**
+ * Safe filename - only removes dangerous filesystem characters
+ * Preserves accents, spaces, and most special characters
+ * Only removes: / \ : * ? " < > | and null bytes
+ */
+function safeFilename(filename) {
+  if (!filename) return 'file';
+
+  // Remove dangerous filesystem characters
+  const safe = filename.replace(/[/\\:*?"<>|\x00]/g, '_');
+
+  // Collapse multiple underscores
+  const collapsed = safe.replace(/_+/g, '_');
+
+  // Trim underscores from start and end
+  const trimmed = collapsed.replace(/^_+|_+$/g, '');
+
+  return trimmed || 'file';
+}
+
+/**
+ * Process filename based on sanitize option
+ * @param {string} filename - Original filename
+ * @param {boolean} sanitize - If true, full sanitization; if false, only safe filename
+ */
+function processFilename(filename, sanitize = true) {
+  return sanitize ? sanitizeFilename(filename) : safeFilename(filename);
+}
+
+module.exports = { sanitizeFilename, safeFilename, processFilename };

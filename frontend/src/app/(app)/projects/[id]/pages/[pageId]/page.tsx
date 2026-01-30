@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -78,6 +79,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [sanitizeFilename, setSanitizeFilename] = useState(true);
 
   // Annotation state
   const [showAnnotationDialog, setShowAnnotationDialog] = useState(false);
@@ -230,7 +232,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
     setIsUploading(true);
     try {
-      await filesApi.upload(pageIdNum, Array.from(files));
+      await filesApi.upload(pageIdNum, Array.from(files), { sanitizeFilename });
       toast.success('Fichier uploadé');
       fetchPageData();
     } catch (error) {
@@ -488,7 +490,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
             </Card>
 
             {/* File actions */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 disabled={isUploading || (isLocked && !isAdmin)}
@@ -513,6 +515,16 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                   </label>
                 )}
               </Button>
+              <div className="flex items-center gap-1.5">
+                <Checkbox
+                  id="sanitize-page-filename"
+                  checked={sanitizeFilename}
+                  onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
+                />
+                <Label htmlFor="sanitize-page-filename" className="text-xs cursor-pointer">
+                  Simplifier noms
+                </Label>
+              </div>
               {currentFile && (
                 <Button variant="outline" asChild>
                   <a
