@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import type { Annotation } from '@/types';
 
 // Configure PDF.js worker
@@ -27,12 +27,46 @@ export function PDFViewer({
   className,
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [scale, setScale] = useState<number>(1);
   const [rotation, setRotation] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch PDF with authentication token
+  useEffect(() => {
+    const fetchPDF = async () => {
+      setIsFetching(true);
+      setError(null);
+      try {
+        // Get token from localStorage
+        const token = localStorage.getItem('accessToken');
+
+        const response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        setPdfData(arrayBuffer);
+      } catch (err) {
+        console.error('PDF fetch error:', err);
+        setError('Impossible de charger le PDF');
+      } finally {
+        setIsFetching(false);
+      }
+    };
+
+    if (url) {
+      fetchPDF();
+    }
+  }, [url]);
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -109,9 +143,12 @@ export function PDFViewer({
         className="relative flex-1 overflow-auto bg-muted/30"
         style={{ minHeight: '500px' }}
       >
-        {isLoading && (
+        {(isFetching || isLoading) && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <Skeleton className="h-[600px] w-[450px]" />
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Chargement du PDF...</span>
+            </div>
           </div>
         )}
 
@@ -121,54 +158,56 @@ export function PDFViewer({
           </div>
         )}
 
-        <div
-          className="flex justify-center p-4 cursor-crosshair"
-          onClick={handlePageClick}
-        >
-          <div className="relative">
-            <Document
-              file={url}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={onDocumentLoadError}
-              loading={null}
-            >
-              <Page
-                pageNumber={pageNumber}
-                scale={scale}
-                rotate={rotation}
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-                className="shadow-lg"
-              />
-            </Document>
+        {pdfData && !error && (
+          <div
+            className="flex justify-center p-4 cursor-crosshair"
+            onClick={handlePageClick}
+          >
+            <div className="relative">
+              <Document
+                file={{ data: pdfData }}
+                onLoadSuccess={onDocumentLoadSuccess}
+                onLoadError={onDocumentLoadError}
+                loading={null}
+              >
+                <Page
+                  pageNumber={pageNumber}
+                  scale={scale}
+                  rotate={rotation}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={true}
+                  className="shadow-lg"
+                />
+              </Document>
 
-            {/* Custom Annotation Markers */}
-            {pageAnnotations.map((annotation) =>
-              annotation.position ? (
-                <div
-                  key={annotation.id}
-                  className={cn(
-                    'absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer hover:scale-110 transition-transform z-10',
-                    annotation.resolved
-                      ? 'bg-green-500 text-white'
-                      : 'bg-primary text-primary-foreground'
-                  )}
-                  style={{
-                    left: `${annotation.position.x}%`,
-                    top: `${annotation.position.y}%`,
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAnnotationClick?.(annotation);
-                  }}
-                  title={annotation.content}
-                >
-                  {annotation.resolved ? '✓' : annotations.indexOf(annotation) + 1}
-                </div>
-              ) : null
-            )}
+              {/* Custom Annotation Markers */}
+              {!isLoading && pageAnnotations.map((annotation) =>
+                annotation.position ? (
+                  <div
+                    key={annotation.id}
+                    className={cn(
+                      'absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer hover:scale-110 transition-transform z-10',
+                      annotation.resolved
+                        ? 'bg-green-500 text-white'
+                        : 'bg-primary text-primary-foreground'
+                    )}
+                    style={{
+                      left: `${annotation.position.x}%`,
+                      top: `${annotation.position.y}%`,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAnnotationClick?.(annotation);
+                    }}
+                    title={annotation.content}
+                  >
+                    {annotation.resolved ? '✓' : annotations.indexOf(annotation) + 1}
+                  </div>
+                ) : null
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Instructions */}
