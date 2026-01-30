@@ -76,40 +76,52 @@ export interface ProjectMember {
 export type PageStatus =
   | 'attente_elements'
   | 'elements_recus'
+  | 'ok_pour_maquette'
   | 'en_maquette'
   | 'maquette_a_valider'
   | 'maquette_validee_photogravure'
   | 'en_peaufinage'
   | 'en_corrections'
+  | 'pour_corrections'
   | 'en_bat'
   | 'bat_valide'
+  | 'dernieres_corrections'
   | 'envoye_imprimeur';
 
 export const PAGE_STATUS_LABELS: Record<PageStatus, string> = {
   attente_elements: 'En attente des éléments',
   elements_recus: 'Éléments reçus',
+  ok_pour_maquette: 'OK pour maquette',
   en_maquette: 'En maquette',
   maquette_a_valider: 'Maquette à valider',
   maquette_validee_photogravure: 'Validée - Photogravure',
   en_peaufinage: 'En peaufinage',
   en_corrections: 'En corrections',
+  pour_corrections: 'Pour corrections',
   en_bat: 'En BAT',
   bat_valide: 'BAT validé',
+  dernieres_corrections: 'Dernières corrections',
   envoye_imprimeur: 'Envoyé imprimeur',
 };
 
 export const PAGE_STATUS_COLORS: Record<PageStatus, string> = {
   attente_elements: 'bg-gray-100 text-gray-800',
   elements_recus: 'bg-blue-100 text-blue-800',
+  ok_pour_maquette: 'bg-cyan-100 text-cyan-800',
   en_maquette: 'bg-yellow-100 text-yellow-800',
   maquette_a_valider: 'bg-orange-100 text-orange-800',
   maquette_validee_photogravure: 'bg-purple-100 text-purple-800',
   en_peaufinage: 'bg-pink-100 text-pink-800',
   en_corrections: 'bg-red-100 text-red-800',
+  pour_corrections: 'bg-rose-100 text-rose-800',
   en_bat: 'bg-indigo-100 text-indigo-800',
   bat_valide: 'bg-green-100 text-green-800',
+  dernieres_corrections: 'bg-amber-100 text-amber-800',
   envoye_imprimeur: 'bg-emerald-100 text-emerald-800',
 };
+
+// Statuts qui verrouillent la page (pas de modifications/annotations)
+export const LOCKED_STATUSES: PageStatus[] = ['bat_valide', 'envoye_imprimeur'];
 
 export interface Page {
   id: number;

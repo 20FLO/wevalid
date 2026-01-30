@@ -89,7 +89,8 @@ const schemas = {
       'pour_corrections',
       'en_bat',
       'bat_valide',
-      'pdf_hd_ok'
+      'dernieres_corrections',
+      'envoye_imprimeur'
     ).required()
   }),
 

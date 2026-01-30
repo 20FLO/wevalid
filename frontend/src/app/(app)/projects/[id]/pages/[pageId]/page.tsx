@@ -47,9 +47,11 @@ import {
   Trash2,
   Plus,
   Highlighter,
+  Lock,
+  ShieldAlert,
 } from 'lucide-react';
 import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus } from '@/types';
-import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS } from '@/types';
+import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS, LOCKED_STATUSES } from '@/types';
 
 // Import PDF viewer dynamically to avoid SSR issues
 const PDFViewer = dynamic(() => import('@/components/pdf/pdf-viewer').then(mod => ({ default: mod.PDFViewer })), {
@@ -136,6 +138,11 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   // Handle image click for annotation
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!page) return;
+    // Block annotations on locked pages (unless admin)
+    if (LOCKED_STATUSES.includes(page.status) && user?.role !== 'admin') {
+      toast.error('Cette page est verrouillée. Annotations désactivées.');
+      return;
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -274,6 +281,10 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const isPDF = currentFile?.file_type === 'application/pdf' || currentFile?.original_filename?.endsWith('.pdf');
   const pdfUrl = currentFile ? filesApi.getDownloadUrl(currentFile.id) : null;
 
+  // Check if page is locked (BAT validé or sent to printer)
+  const isLocked = LOCKED_STATUSES.includes(page.status);
+  const isAdmin = user?.role === 'admin';
+
   return (
     <>
       <Header
@@ -333,6 +344,11 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     url={pdfUrl}
                     annotations={annotations}
                     onAnnotate={(data) => {
+                      // Block annotations on locked pages
+                      if (isLocked && !isAdmin) {
+                        toast.error('Cette page est verrouillée. Annotations désactivées.');
+                        return;
+                      }
                       setAnnotationData(data);
                       setAnnotationType(data.type === 'highlight' ? 'highlight' : 'comment');
                       if (data.selectedText) {
@@ -389,7 +405,14 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     </div>
 
                     <p className="text-xs text-muted-foreground p-2 text-center">
-                      Cliquez sur l&apos;image pour ajouter une annotation
+                      {isLocked && !isAdmin ? (
+                        <span className="flex items-center justify-center gap-1 text-green-600">
+                          <Lock className="h-3 w-3" />
+                          Page verrouillée - Annotations désactivées
+                        </span>
+                      ) : (
+                        'Cliquez sur l\'image pour ajouter une annotation'
+                      )}
                     </p>
                   </>
                 )}
@@ -445,18 +468,29 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
             {/* File actions */}
             <div className="flex gap-2">
-              <Button variant="outline" asChild disabled={!currentFile}>
-                <label className="cursor-pointer">
-                  <Upload className="mr-2 h-4 w-4" />
-                  {isUploading ? 'Upload...' : 'Uploader un fichier'}
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png,.tiff,.psd"
-                    onChange={handleFileUpload}
-                    disabled={isUploading}
-                  />
-                </label>
+              <Button
+                variant="outline"
+                disabled={isUploading || (isLocked && !isAdmin)}
+                asChild={!(isLocked && !isAdmin)}
+              >
+                {isLocked && !isAdmin ? (
+                  <span className="flex items-center">
+                    <Lock className="mr-2 h-4 w-4" />
+                    Upload verrouillé
+                  </span>
+                ) : (
+                  <label className="cursor-pointer">
+                    <Upload className="mr-2 h-4 w-4" />
+                    {isUploading ? 'Upload...' : 'Uploader un fichier'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.tiff,.psd"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                    />
+                  </label>
+                )}
               </Button>
               {currentFile && (
                 <Button variant="outline" asChild>
@@ -476,14 +510,27 @@ export default function PageDetailPage({ params }: PageDetailProps) {
           {/* Sidebar */}
           <div className="space-y-4">
             {/* Status card */}
-            <Card>
+            <Card className={isLocked ? 'border-green-500' : ''}>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Statut</CardTitle>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  Statut
+                  {isLocked && <Lock className="h-4 w-4 text-green-600" />}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Badge className={PAGE_STATUS_COLORS[page.status]}>
                   {PAGE_STATUS_LABELS[page.status]}
                 </Badge>
+
+                {isLocked && (
+                  <div className="flex items-start gap-2 p-2 bg-green-50 border border-green-200 rounded-md">
+                    <ShieldAlert className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-green-700">
+                      Cette page est verrouillée. Les annotations et uploads sont désactivés.
+                      {isAdmin && ' En tant qu\'admin, vous pouvez changer le statut pour débloquer.'}
+                    </p>
+                  </div>
+                )}
 
                 {allowedTransitions.length > 0 && (
                   <div className="space-y-2">
@@ -590,15 +637,29 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                 <Button
                   variant="outline"
                   className="w-full"
+                  disabled={isLocked && !isAdmin}
                   onClick={() => {
                     if (!page) return;
+                    if (isLocked && !isAdmin) {
+                      toast.error('Cette page est verrouillée. Annotations désactivées.');
+                      return;
+                    }
                     setAnnotationData({ x: 50, y: 50, pageNumber: page.page_number, type: 'click' });
                     setAnnotationType('comment');
                     setShowAnnotationDialog(true);
                   }}
                 >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Ajouter une annotation
+                  {isLocked && !isAdmin ? (
+                    <>
+                      <Lock className="mr-2 h-4 w-4" />
+                      Page verrouillée
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Ajouter une annotation
+                    </>
+                  )}
                 </Button>
               </TabsContent>
 

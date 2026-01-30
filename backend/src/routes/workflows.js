@@ -11,48 +11,63 @@ const workflowRules = {
   'attente_elements': {
     'auteur': ['elements_recus'],
     'editeur': ['elements_recus'],
-    'graphiste': ['elements_recus']
+    'graphiste': ['elements_recus'],
+    'admin': ['elements_recus', 'en_maquette'] // Admin peut forcer
   },
   'elements_recus': {
     'editeur': ['ok_pour_maquette'],
-    'fabricant': ['ok_pour_maquette']
+    'fabricant': ['ok_pour_maquette'],
+    'admin': ['ok_pour_maquette', 'attente_elements']
   },
   'ok_pour_maquette': {
     'graphiste': ['en_maquette'],
-    'editeur': ['en_maquette']
+    'editeur': ['en_maquette'],
+    'admin': ['en_maquette', 'elements_recus']
   },
   'en_maquette': {
     'graphiste': ['maquette_a_valider'],
-    'editeur': ['maquette_a_valider']
+    'editeur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'ok_pour_maquette']
   },
   'maquette_a_valider': {
     'editeur': ['maquette_validee_photogravure', 'pour_corrections'],
     'fabricant': ['maquette_validee_photogravure', 'pour_corrections'],
-    'auteur': ['maquette_validee_photogravure', 'pour_corrections']
+    'auteur': ['maquette_validee_photogravure', 'pour_corrections'],
+    'admin': ['maquette_validee_photogravure', 'pour_corrections', 'en_maquette']
   },
   'maquette_validee_photogravure': {
     'photograveur': ['en_bat'],
     'graphiste': ['en_peaufinage'],
-    'editeur': ['en_peaufinage']
+    'editeur': ['en_peaufinage'],
+    'admin': ['en_bat', 'en_peaufinage', 'maquette_a_valider']
   },
   'en_peaufinage': {
     'graphiste': ['maquette_a_valider'],
-    'editeur': ['maquette_a_valider']
+    'editeur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'maquette_validee_photogravure']
   },
   'pour_corrections': {
     'graphiste': ['maquette_a_valider'],
-    'auteur': ['maquette_a_valider']
+    'auteur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'en_bat']
   },
   'en_bat': {
     'photograveur': ['bat_valide'],
-    'editeur': ['pour_corrections', 'bat_valide']
+    'editeur': ['pour_corrections', 'bat_valide'],
+    'admin': ['bat_valide', 'pour_corrections', 'maquette_validee_photogravure']
   },
   'bat_valide': {
-    'editeur': ['pdf_hd_ok'],
-    'fabricant': ['pdf_hd_ok']
+    'editeur': ['dernieres_corrections', 'envoye_imprimeur'],
+    'fabricant': ['dernieres_corrections', 'envoye_imprimeur'],
+    'admin': ['dernieres_corrections', 'envoye_imprimeur', 'en_bat'] // Admin peut débloquer
   },
-  'pdf_hd_ok': {
-    // État final, pas de transition
+  'dernieres_corrections': {
+    'graphiste': ['bat_valide'],
+    'editeur': ['bat_valide'],
+    'admin': ['bat_valide', 'maquette_a_valider'] // Admin peut revenir plus loin
+  },
+  'envoye_imprimeur': {
+    'admin': ['dernieres_corrections', 'bat_valide'] // Seul admin peut revenir
   }
 };
 
@@ -68,7 +83,8 @@ const statusLabels = {
   'pour_corrections': 'Pour corrections',
   'en_bat': 'En BAT',
   'bat_valide': 'BAT validé',
-  'pdf_hd_ok': 'PDF HD OK'
+  'dernieres_corrections': 'Dernières corrections',
+  'envoye_imprimeur': 'Envoyé imprimeur'
 };
 
 // Notifications par statut -> rôles à notifier
@@ -81,7 +97,8 @@ const notificationRules = {
   'pour_corrections': ['graphiste'],
   'en_bat': ['editeur', 'fabricant'],
   'bat_valide': ['editeur', 'fabricant'],
-  'pdf_hd_ok': ['photograveur']
+  'dernieres_corrections': ['graphiste', 'editeur'], // Notifier pour corrections finales
+  'envoye_imprimeur': ['fabricant', 'editeur']
 };
 
 // Exporter pour utilisation dans pages.js

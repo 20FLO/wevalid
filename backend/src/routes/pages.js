@@ -13,47 +13,64 @@ const workflowRules = {
   'attente_elements': {
     'auteur': ['elements_recus'],
     'editeur': ['elements_recus'],
-    'graphiste': ['elements_recus']
+    'graphiste': ['elements_recus'],
+    'admin': ['elements_recus', 'en_maquette']
   },
   'elements_recus': {
     'editeur': ['ok_pour_maquette'],
-    'fabricant': ['ok_pour_maquette']
+    'fabricant': ['ok_pour_maquette'],
+    'admin': ['ok_pour_maquette', 'attente_elements']
   },
   'ok_pour_maquette': {
     'graphiste': ['en_maquette'],
-    'editeur': ['en_maquette']
+    'editeur': ['en_maquette'],
+    'admin': ['en_maquette', 'elements_recus']
   },
   'en_maquette': {
     'graphiste': ['maquette_a_valider'],
-    'editeur': ['maquette_a_valider']
+    'editeur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'ok_pour_maquette']
   },
   'maquette_a_valider': {
     'editeur': ['maquette_validee_photogravure', 'pour_corrections'],
     'fabricant': ['maquette_validee_photogravure', 'pour_corrections'],
-    'auteur': ['maquette_validee_photogravure', 'pour_corrections']
+    'auteur': ['maquette_validee_photogravure', 'pour_corrections'],
+    'admin': ['maquette_validee_photogravure', 'pour_corrections', 'en_maquette']
   },
   'maquette_validee_photogravure': {
     'photograveur': ['en_bat'],
     'graphiste': ['en_peaufinage'],
-    'editeur': ['en_peaufinage']
+    'editeur': ['en_peaufinage'],
+    'admin': ['en_bat', 'en_peaufinage', 'maquette_a_valider']
   },
   'en_peaufinage': {
     'graphiste': ['maquette_a_valider'],
-    'editeur': ['maquette_a_valider']
+    'editeur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'maquette_validee_photogravure']
   },
   'pour_corrections': {
     'graphiste': ['maquette_a_valider'],
-    'auteur': ['maquette_a_valider']
+    'auteur': ['maquette_a_valider'],
+    'admin': ['maquette_a_valider', 'en_bat']
   },
   'en_bat': {
     'photograveur': ['bat_valide'],
-    'editeur': ['pour_corrections', 'bat_valide']
+    'editeur': ['pour_corrections', 'bat_valide'],
+    'admin': ['bat_valide', 'pour_corrections', 'maquette_validee_photogravure']
   },
   'bat_valide': {
-    'editeur': ['pdf_hd_ok'],
-    'fabricant': ['pdf_hd_ok']
+    'editeur': ['dernieres_corrections', 'envoye_imprimeur'],
+    'fabricant': ['dernieres_corrections', 'envoye_imprimeur'],
+    'admin': ['dernieres_corrections', 'envoye_imprimeur', 'en_bat']
   },
-  'pdf_hd_ok': {}
+  'dernieres_corrections': {
+    'graphiste': ['bat_valide'],
+    'editeur': ['bat_valide'],
+    'admin': ['bat_valide', 'maquette_a_valider']
+  },
+  'envoye_imprimeur': {
+    'admin': ['dernieres_corrections', 'bat_valide']
+  }
 };
 
 // Notifications par statut -> rôles à notifier
@@ -66,7 +83,8 @@ const notificationRules = {
   'pour_corrections': ['graphiste'],
   'en_bat': ['editeur', 'fabricant'],
   'bat_valide': ['editeur', 'fabricant'],
-  'pdf_hd_ok': ['photograveur']
+  'dernieres_corrections': ['graphiste', 'editeur'],
+  'envoye_imprimeur': ['fabricant', 'editeur']
 };
 
 // Lister toutes les pages d'un projet
@@ -134,6 +152,7 @@ router.get('/:id', async (req, res) => {
 router.patch('/:id/status', validate(schemas.updatePageStatus), async (req, res) => {
   const { id } = req.params;
   const { status } = req.validatedBody;
+  const isAdmin = req.user.role === 'admin';
 
   try {
     // Récupérer la page actuelle avec infos projet
@@ -144,7 +163,7 @@ router.patch('/:id/status', validate(schemas.updatePageStatus), async (req, res)
        WHERE p.id = $1`,
       [id]
     );
-    
+
     if (pageResult.rows.length === 0) {
       return res.status(404).json({ error: { message: 'Page non trouvée' } });
     }
@@ -152,14 +171,30 @@ router.patch('/:id/status', validate(schemas.updatePageStatus), async (req, res)
     const currentPage = pageResult.rows[0];
     const currentStatus = currentPage.status;
 
+    // Vérifier si la page a des fichiers PDF (pour la règle attente_elements)
+    if (status === 'attente_elements' && !isAdmin) {
+      const filesResult = await pool.query(
+        `SELECT COUNT(*) as pdf_count FROM files
+         WHERE page_id = $1 AND file_type = 'application/pdf'`,
+        [id]
+      );
+      if (parseInt(filesResult.rows[0].pdf_count) > 0) {
+        return res.status(400).json({
+          error: {
+            message: 'Impossible de mettre en attente une page qui contient un PDF. Contactez un administrateur pour débloquer.'
+          }
+        });
+      }
+    }
+
     // Vérifier les transitions autorisées selon le rôle
     const allowedTransitions = workflowRules[currentStatus]?.[req.user.role] || [];
 
     if (!allowedTransitions.includes(status)) {
-      return res.status(403).json({ 
-        error: { 
-          message: `Transition non autorisée: ${currentStatus} → ${status} pour le rôle ${req.user.role}` 
-        } 
+      return res.status(403).json({
+        error: {
+          message: `Transition non autorisée: ${currentStatus} → ${status} pour le rôle ${req.user.role}`
+        }
       });
     }
 
