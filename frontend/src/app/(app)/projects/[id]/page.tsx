@@ -1,10 +1,12 @@
 'use client';
 
-import { use, useState, useEffect, useCallback } from 'react';
+import { use, useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useProject, useProjectPages } from '@/hooks/use-projects';
 import { projectsApi } from '@/lib/api/projects';
 import { projectFilesApi } from '@/lib/api/project-files';
+import { filesApi } from '@/lib/api/files';
 import { Header } from '@/components/layout/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,8 +14,11 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { PageStatus, ProjectFile, ProjectDashboard as DashboardData } from '@/types';
-import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen } from 'lucide-react';
+import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen, Upload, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { PageThumbnail } from '@/components/projects/page-thumbnail';
 import { ProjectFilesTab } from '@/components/projects/project-files-tab';
 import { ProjectDashboard } from '@/components/projects/project-dashboard';
@@ -31,9 +36,15 @@ interface ProjectPageProps {
 export default function ProjectPage({ params }: ProjectPageProps) {
   const { id } = use(params);
   const projectId = parseInt(id);
+  const router = useRouter();
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
-  const { project, isLoading: projectLoading } = useProject(projectId);
-  const { pages, isLoading: pagesLoading } = useProjectPages(projectId);
+  const { project, isLoading: projectLoading, refetch: refreshProject } = useProject(projectId);
+  const { pages, isLoading: pagesLoading, refetch: refreshPages } = useProjectPages(projectId);
+
+  // PDF upload state
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [uploadStartPage, setUploadStartPage] = useState<string>('');
 
   // Page filtering/sorting state
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
@@ -92,6 +103,35 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
   // Apply filters and sorting
   const filteredPages = useFilteredPages(pages, statusFilter, sortField, sortDirection);
+
+  // Handle complete PDF upload
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      toast.error('Veuillez sélectionner un fichier PDF');
+      return;
+    }
+
+    setIsUploadingPdf(true);
+    try {
+      const startPage = uploadStartPage ? parseInt(uploadStartPage) : undefined;
+      const result = await filesApi.uploadCompletePdf(projectId, file, startPage);
+      toast.success(`PDF découpé en ${result.stats.files_created} pages`);
+      // Refresh pages list
+      refreshPages();
+      refreshProject();
+      fetchDashboard();
+      // Reset
+      setUploadStartPage('');
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'upload');
+    } finally {
+      setIsUploadingPdf(false);
+    }
+  };
 
   if (projectLoading) {
     return (
@@ -266,6 +306,60 @@ export default function ProjectPage({ params }: ProjectPageProps) {
           </TabsContent>
 
           <TabsContent value="pages" className="mt-4 space-y-4">
+            {/* Upload PDF complet */}
+            <Card className="bg-muted/30">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+                  <div className="flex-1 space-y-2">
+                    <Label htmlFor="pdf-upload" className="text-sm font-medium">
+                      Upload PDF complet
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Le PDF sera découpé page par page et assigné aux pages du projet
+                    </p>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="w-24">
+                      <Label htmlFor="start-page" className="text-xs">Page départ</Label>
+                      <Input
+                        id="start-page"
+                        type="number"
+                        min="1"
+                        placeholder="1"
+                        value={uploadStartPage}
+                        onChange={(e) => setUploadStartPage(e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      disabled={isUploadingPdf}
+                      onClick={() => pdfInputRef.current?.click()}
+                    >
+                      {isUploadingPdf ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Découpage...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Sélectionner PDF
+                        </>
+                      )}
+                    </Button>
+                    <input
+                      ref={pdfInputRef}
+                      type="file"
+                      accept=".pdf"
+                      className="hidden"
+                      onChange={handlePdfUpload}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Filters */}
             {pages.length > 0 && (
               <PageFilters

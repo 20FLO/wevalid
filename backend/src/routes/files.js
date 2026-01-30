@@ -168,6 +168,7 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
 router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.single('file'), async (req, res) => {
   const project_id = req.body.project_id || req.query.project_id;
   const extract_annotations = req.body.extract_annotations !== 'false';
+  const start_page = parseInt(req.body.start_page) || 1; // Page de départ (folio)
 
   if (!project_id) {
     return res.status(400).json({ error: { message: 'project_id requis' } });
@@ -201,12 +202,13 @@ router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur
     });
 
     const uploadedFiles = await splitAndAssignPDF(
-      req.file.path, 
-      project_id, 
+      req.file.path,
+      project_id,
       pdfPageCount,
       req.user.id,
       client,
-      extract_annotations
+      extract_annotations,
+      start_page
     );
 
     await client.query('COMMIT');
@@ -405,26 +407,27 @@ async function countPDFPages(pdfPath) {
   }
 }
 
-async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client, extractAnnotations = true) {
+async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client, extractAnnotations = true, startPage = 1) {
   try {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execPromise = promisify(exec);
 
+    // Get project pages starting from the specified page number
     const pagesResult = await client.query(
-      'SELECT id, page_number FROM pages WHERE project_id = $1 ORDER BY page_number',
-      [projectId]
+      'SELECT id, page_number FROM pages WHERE project_id = $1 AND page_number >= $2 ORDER BY page_number',
+      [projectId, startPage]
     );
 
     const projectPages = pagesResult.rows;
     const uploadedFiles = [];
     const maxPages = Math.min(pdfPageCount, projectPages.length);
 
-    logger.info(`Découpage en cours: ${maxPages} pages à traiter...`);
+    logger.info(`Découpage en cours: ${maxPages} pages à traiter (départ page ${startPage})...`);
 
     for (let i = 0; i < maxPages; i++) {
-      const pageNum = i + 1;
-      const projectPage = projectPages[i];
+      const pdfPageNum = i + 1; // Page number in the PDF (1-indexed)
+      const projectPage = projectPages[i]; // Corresponding project page
 
       await client.query(
         'UPDATE files SET is_current = false WHERE page_id = $1 AND is_current = true',
@@ -439,11 +442,12 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
 
       const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(7);
-      const outputFilename = `${timestamp}-${randomString}-page${pageNum}.pdf`;
+      const outputFilename = `${timestamp}-${randomString}-page${projectPage.page_number}.pdf`;
       const outputPath = path.join('/app/storage/uploads', outputFilename);
 
+      // Extract the pdfPageNum-th page from the PDF
       await execPromise(
-        `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dFirstPage=${pageNum} -dLastPage=${pageNum} -sOutputFile=${outputPath} ${pdfPath}`
+        `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dFirstPage=${pdfPageNum} -dLastPage=${pdfPageNum} -sOutputFile=${outputPath} ${pdfPath}`
       );
 
       const thumbnailPath = await generatePDFThumbnail(outputPath);
@@ -477,7 +481,7 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
         [
           projectPage.id,
           outputFilename,
-          `page_${pageNum}.pdf`,
+          `page_${projectPage.page_number}.pdf`,
           outputPath,
           thumbnailPath,
           'application/pdf',
@@ -490,8 +494,8 @@ async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, clien
 
       uploadedFiles.push(result.rows[0]);
 
-      if (pageNum % 10 === 0) {
-        logger.info(`Progression découpage: ${pageNum}/${maxPages} pages`);
+      if ((i + 1) % 10 === 0) {
+        logger.info(`Progression découpage: ${i + 1}/${maxPages} pages`);
       }
     }
 
