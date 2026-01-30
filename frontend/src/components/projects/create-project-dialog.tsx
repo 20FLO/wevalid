@@ -103,7 +103,7 @@ export function CreateProjectDialog({
         isbn: formData.isbn || undefined,
         description: formData.description || undefined,
         total_pages: parseInt(formData.total_pages) || 1,
-        publisher_id: formData.publisher_id ? parseInt(formData.publisher_id) : undefined,
+        publisher_id: formData.publisher_id && formData.publisher_id !== 'none' ? parseInt(formData.publisher_id) : undefined,
         width_mm: formData.width_mm ? parseInt(formData.width_mm) : undefined,
         height_mm: formData.height_mm ? parseInt(formData.height_mm) : undefined,
       });
@@ -162,7 +162,7 @@ export function CreateProjectDialog({
                   <SelectValue placeholder={loadingPublishers ? 'Chargement...' : 'Sélectionner une maison'} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Aucune</SelectItem>
+                  <SelectItem value="none">Aucune</SelectItem>
                   {publishers.map((publisher) => (
                     <SelectItem key={publisher.id} value={String(publisher.id)}>
                       {publisher.name}
