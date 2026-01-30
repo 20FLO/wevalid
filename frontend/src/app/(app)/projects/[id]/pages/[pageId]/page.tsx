@@ -625,6 +625,36 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                 <Upload className="mr-1 h-3 w-3" />
                 Import XFDF
               </Button>
+              {/* Download PDF with embedded annotations */}
+              {currentFile && isPDF && annotations.length > 0 && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => {
+                    const token = localStorage.getItem('accessToken');
+                    const url = filesApi.getAnnotatedDownloadUrl(currentFile.id);
+                    // Download with auth
+                    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+                      .then(res => {
+                        if (!res.ok) throw new Error('Erreur');
+                        return res.blob();
+                      })
+                      .then(blob => {
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        const baseName = currentFile.original_filename?.replace(/\.pdf$/i, '') || 'page';
+                        a.download = `${baseName}_annote.pdf`;
+                        a.click();
+                        toast.success('PDF annoté téléchargé');
+                      })
+                      .catch(() => toast.error('Erreur téléchargement'));
+                  }}
+                  title="PDF avec annotations incrustées"
+                >
+                  <Download className="mr-1 h-3 w-3" />
+                  PDF Annoté
+                </Button>
+              )}
             </div>
           </div>
 

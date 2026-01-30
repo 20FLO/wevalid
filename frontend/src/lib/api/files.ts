@@ -66,4 +66,11 @@ export const filesApi = {
   async download(fileId: number): Promise<Blob> {
     return apiClient.get(`/files/download/${fileId}`);
   },
+
+  /**
+   * Get URL to download PDF with embedded annotations
+   */
+  getAnnotatedDownloadUrl(fileId: number): string {
+    return `${API_BASE_URL}/files/download-annotated/${fileId}`;
+  },
 };

@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const sharp = require('sharp');
 const { extractAnnotationsFromPDF } = require('../utils/pdfAnnotations');
+const { embedAnnotationsInPDF } = require('../utils/pdfAnnotationEmbed');
 
 // ============================================
 // ENDPOINT PUBLIC - Miniatures (pas d'auth)
@@ -260,6 +261,80 @@ router.get('/download/:id', async (req, res) => {
     logger.info('Fichier téléchargé:', { fileId: id, downloadedBy: req.user.id });
   } catch (error) {
     logger.error('Erreur lors du téléchargement:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// Télécharger un PDF avec annotations incrustées
+router.get('/download-annotated/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Get file info
+    const fileResult = await pool.query(
+      `SELECT f.*, p.page_number, p.id as page_id
+       FROM files f
+       JOIN pages p ON f.page_id = p.id
+       WHERE f.id = $1`,
+      [id]
+    );
+
+    if (fileResult.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Fichier non trouvé' } });
+    }
+
+    const file = fileResult.rows[0];
+
+    // Check if it's a PDF
+    if (file.file_type !== 'application/pdf') {
+      return res.status(400).json({ error: { message: 'Seuls les PDFs peuvent avoir des annotations incrustées' } });
+    }
+
+    // Check file exists
+    try {
+      await fs.access(file.file_path);
+    } catch {
+      return res.status(404).json({ error: { message: 'Fichier physique introuvable' } });
+    }
+
+    // Get annotations for this page
+    const annotResult = await pool.query(
+      `SELECT a.*, u.first_name || ' ' || u.last_name as author_name,
+              ROW_NUMBER() OVER (ORDER BY a.created_at) as marker_number
+       FROM annotations a
+       LEFT JOIN users u ON a.created_by = u.id
+       WHERE a.page_id = $1
+       ORDER BY a.created_at`,
+      [file.page_id]
+    );
+
+    const annotations = annotResult.rows;
+
+    if (annotations.length === 0) {
+      // No annotations, just return original file
+      return res.download(file.file_path, file.original_filename);
+    }
+
+    // Embed annotations into PDF
+    const annotatedPdfBuffer = await embedAnnotationsInPDF(file.file_path, annotations);
+
+    // Generate filename
+    const baseName = file.original_filename.replace(/\.pdf$/i, '');
+    const annotatedFilename = `${baseName}_annote.pdf`;
+
+    // Send the annotated PDF
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${annotatedFilename}"`);
+    res.send(annotatedPdfBuffer);
+
+    logger.info('PDF annoté téléchargé:', {
+      fileId: id,
+      annotationsCount: annotations.length,
+      downloadedBy: req.user.id
+    });
+
+  } catch (error) {
+    logger.error('Erreur lors du téléchargement annoté:', error);
     res.status(500).json({ error: { message: 'Erreur serveur' } });
   }
 });
