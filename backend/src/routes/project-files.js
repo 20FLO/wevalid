@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const { pool } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { sanitizeFilename } = require('../utils/sanitize');
 
 // Configuration multer pour upload
 const storage = multer.diskStorage({
@@ -21,8 +22,8 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, uniqueSuffix + ext);
+    const sanitized = sanitizeFilename(file.originalname);
+    cb(null, uniqueSuffix + '_' + sanitized);
   }
 });
 

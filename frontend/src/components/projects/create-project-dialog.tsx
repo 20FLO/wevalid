@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { projectsApi } from '@/lib/api/projects';
 import { publishersApi } from '@/lib/api/publishers';
 import { projectFilesApi } from '@/lib/api/project-files';
+import { usersApi } from '@/lib/api/users';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -27,8 +29,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, FileText, Image, X, Upload } from 'lucide-react';
-import type { Publisher } from '@/types';
+import { Loader2, FileText, Image, X, Upload, Users, UserPlus } from 'lucide-react';
+import type { Publisher, User } from '@/types';
 
 // Predefined book formats
 const BOOK_FORMATS = [
@@ -77,6 +79,11 @@ export function CreateProjectDialog({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
+  // Users state
+  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
   // Load publishers when dialog opens
   useEffect(() => {
     if (open && (user?.role === 'admin' || user?.role === 'fabricant')) {
@@ -90,6 +97,20 @@ export function CreateProjectDialog({
         .finally(() => setLoadingPublishers(false));
     }
   }, [open, user?.role]);
+
+  // Load users when dialog opens
+  useEffect(() => {
+    if (open && (user?.role === 'admin' || user?.role === 'fabricant' || user?.role === 'editeur')) {
+      setLoadingUsers(true);
+      usersApi
+        .getAll()
+        .then((response) => setAvailableUsers(response.users.filter((u: User) => u.id !== user?.id)))
+        .catch((error) => {
+          console.error('Failed to load users:', error);
+        })
+        .finally(() => setLoadingUsers(false));
+    }
+  }, [open, user?.role, user?.id]);
 
   // Handle format selection
   const handleFormatChange = (formatLabel: string) => {
@@ -178,12 +199,29 @@ export function CreateProjectDialog({
           category: 'image',
           description: `Projet #${projectId} - ${formData.title}`,
         });
+        setUploadProgress(80);
+      }
+
+      // 4. Add selected users to project
+      if (selectedUserIds.length > 0) {
+        setUploadStatus(`Ajout des membres (${selectedUserIds.length})...`);
+        for (const userId of selectedUserIds) {
+          try {
+            await projectsApi.addMember(projectId, userId);
+          } catch (error) {
+            console.error(`Failed to add user ${userId}:`, error);
+          }
+        }
         setUploadProgress(100);
       }
 
       const totalFiles = documentFiles.length + imageFiles.length;
-      if (totalFiles > 0) {
-        toast.success(`Projet créé avec ${totalFiles} fichier(s)`);
+      const message = [];
+      if (totalFiles > 0) message.push(`${totalFiles} fichier(s)`);
+      if (selectedUserIds.length > 0) message.push(`${selectedUserIds.length} membre(s)`);
+
+      if (message.length > 0) {
+        toast.success(`Projet créé avec ${message.join(' et ')}`);
       } else {
         toast.success('Projet créé avec succès');
       }
@@ -203,6 +241,7 @@ export function CreateProjectDialog({
       setWantImages(false);
       setDocumentFiles([]);
       setImageFiles([]);
+      setSelectedUserIds([]);
       setUploadProgress(0);
       setUploadStatus('');
       onSuccess();
@@ -456,6 +495,62 @@ export function CreateProjectDialog({
               </div>
             )}
           </div>
+
+          {/* User assignment */}
+          {availableUsers.length > 0 && (
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Membres du projet
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Sélectionnez les utilisateurs qui travailleront sur ce projet
+              </p>
+
+              <Select
+                onValueChange={(value) => {
+                  const userId = parseInt(value);
+                  if (!selectedUserIds.includes(userId)) {
+                    setSelectedUserIds([...selectedUserIds, userId]);
+                  }
+                }}
+              >
+                <SelectTrigger disabled={loadingUsers}>
+                  <SelectValue placeholder={loadingUsers ? 'Chargement...' : 'Ajouter un membre'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableUsers
+                    .filter((u) => !selectedUserIds.includes(u.id))
+                    .map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>
+                        {u.first_name} {u.last_name} ({u.role})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+
+              {selectedUserIds.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedUserIds.map((userId) => {
+                    const selectedUser = availableUsers.find((u) => u.id === userId);
+                    if (!selectedUser) return null;
+                    return (
+                      <Badge key={userId} variant="secondary" className="flex items-center gap-1">
+                        {selectedUser.first_name} {selectedUser.last_name}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUserIds(selectedUserIds.filter((id) => id !== userId))}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Upload progress */}
           {isLoading && uploadStatus && (
