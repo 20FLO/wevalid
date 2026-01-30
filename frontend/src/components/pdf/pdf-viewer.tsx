@@ -4,6 +4,21 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/TextLayer.css';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
+
+// Custom styles for text selection
+const textLayerStyles = `
+  .react-pdf__Page__textContent {
+    user-select: text !important;
+    cursor: text !important;
+  }
+  .react-pdf__Page__textContent span {
+    user-select: text !important;
+  }
+  .react-pdf__Page__textContent::selection,
+  .react-pdf__Page__textContent span::selection {
+    background: rgba(0, 100, 255, 0.3) !important;
+  }
+`;
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ZoomIn, ZoomOut, RotateCw, Loader2 } from 'lucide-react';
@@ -90,10 +105,33 @@ export function PDFViewer({
     setIsLoading(false);
   }, []);
 
+  // Track if mouse was dragged (for text selection)
+  const isDraggingRef = useRef(false);
+  const mouseDownPosRef = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+    isDraggingRef.current = false;
+  }, []);
+
+  const handleMouseMove = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
+
   // Handle click for comment annotation (auto-detect: no text selected = click)
   const handlePageClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onAnnotate) return;
+
+      // If we were dragging (selecting text), don't create click annotation
+      if (isDraggingRef.current) {
+        const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
+        const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
+        // If moved more than 5px, consider it a drag/selection
+        if (dx > 5 || dy > 5) {
+          return;
+        }
+      }
 
       // Check if there's a text selection - if so, don't create click annotation
       const selection = window.getSelection();
@@ -117,47 +155,63 @@ export function PDFViewer({
   const handleMouseUp = useCallback(() => {
     if (!onAnnotate) return;
 
-    const selection = window.getSelection();
-    if (!selection || !selection.toString().trim()) return;
+    // Small delay to ensure selection is complete
+    setTimeout(() => {
+      const selection = window.getSelection();
+      if (!selection || !selection.toString().trim()) return;
 
-    const selectedText = selection.toString().trim();
-    const range = selection.getRangeAt(0);
-    const rects = range.getClientRects();
+      const selectedText = selection.toString().trim();
 
-    if (rects.length === 0) return;
+      // Need at least some text selected
+      if (selectedText.length < 1) return;
 
-    const pageElement = pageContainerRef.current?.querySelector('.react-pdf__Page__canvas');
-    if (!pageElement) return;
+      let range;
+      try {
+        range = selection.getRangeAt(0);
+      } catch {
+        return;
+      }
 
-    const pageRect = pageElement.getBoundingClientRect();
+      const rects = range.getClientRects();
+      if (rects.length === 0) return;
 
-    // Get bounding box of all selection rects
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const rect of rects) {
-      minX = Math.min(minX, rect.left);
-      minY = Math.min(minY, rect.top);
-      maxX = Math.max(maxX, rect.right);
-      maxY = Math.max(maxY, rect.bottom);
-    }
+      const pageElement = pageContainerRef.current?.querySelector('.react-pdf__Page__canvas');
+      if (!pageElement) return;
 
-    // Convert to percentages relative to page
-    const x = ((minX - pageRect.left) / pageRect.width) * 100;
-    const y = ((minY - pageRect.top) / pageRect.height) * 100;
-    const width = ((maxX - minX) / pageRect.width) * 100;
-    const height = ((maxY - minY) / pageRect.height) * 100;
+      const pageRect = pageElement.getBoundingClientRect();
 
-    onAnnotate({
-      x,
-      y,
-      width,
-      height,
-      pageNumber,
-      selectedText,
-      type: 'highlight',
-    });
+      // Get bounding box of all selection rects
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const rect of rects) {
+        minX = Math.min(minX, rect.left);
+        minY = Math.min(minY, rect.top);
+        maxX = Math.max(maxX, rect.right);
+        maxY = Math.max(maxY, rect.bottom);
+      }
 
-    // Clear selection
-    selection.removeAllRanges();
+      // Convert to percentages relative to page
+      const x = ((minX - pageRect.left) / pageRect.width) * 100;
+      const y = ((minY - pageRect.top) / pageRect.height) * 100;
+      const width = ((maxX - minX) / pageRect.width) * 100;
+      const height = ((maxY - minY) / pageRect.height) * 100;
+
+      // Only create highlight if we have valid dimensions
+      if (width > 0 && height > 0) {
+        console.log('Creating highlight annotation:', { x, y, width, height, selectedText });
+        onAnnotate({
+          x,
+          y,
+          width,
+          height,
+          pageNumber,
+          selectedText,
+          type: 'highlight',
+        });
+      }
+
+      // Clear selection after a brief moment
+      setTimeout(() => selection.removeAllRanges(), 100);
+    }, 10);
   }, [onAnnotate, pageNumber]);
 
   const goToPrevPage = () => setPageNumber((prev) => Math.max(prev - 1, 1));
@@ -181,6 +235,17 @@ export function PDFViewer({
 
   // Memoize file object to prevent unnecessary reloads
   const file = useMemo(() => pdfData ? { data: pdfData } : null, [pdfData]);
+
+  // Inject custom styles for text selection
+  useEffect(() => {
+    const styleId = 'pdf-text-layer-styles';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = textLayerStyles;
+      document.head.appendChild(style);
+    }
+  }, []);
 
   return (
     <div className={cn('flex flex-col', className)}>
@@ -222,6 +287,8 @@ export function PDFViewer({
         {file && !error && (
           <div
             className="flex justify-center p-4 cursor-crosshair"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
             onClick={handlePageClick}
             onMouseUp={handleMouseUp}
           >
@@ -244,9 +311,13 @@ export function PDFViewer({
 
               {/* Custom Annotation Markers - positioned over the PDF page */}
               <div className="absolute inset-0 pointer-events-none">
-                {!isLoading && pageAnnotations.map((annotation, index) => {
+                {!isLoading && pageAnnotations.map((annotation) => {
                   const pos = parsePosition(annotation.position);
                   if (!pos) return null;
+
+                  // Find global index for numbering (among all non-highlight annotations)
+                  const commentAnnotations = annotations.filter(a => a.type !== 'highlight');
+                  const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
 
                   // Check if it's a highlight with dimensions
                   const isHighlight = annotation.type === 'highlight' &&
@@ -301,7 +372,7 @@ export function PDFViewer({
                       }}
                       title={annotation.content}
                     >
-                      {annotation.resolved ? '✓' : index + 1}
+                      {annotation.resolved ? '✓' : globalIndex || annotation.id}
                     </div>
                   );
                 })}
