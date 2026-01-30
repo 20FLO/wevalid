@@ -98,19 +98,32 @@ export function CreateProjectDialog({
     }
   }, [open, user?.role]);
 
-  // Load users when dialog opens
+  // Load users from selected publisher - exclude graphistes (they receive email links)
   useEffect(() => {
-    if (open && (user?.role === 'admin' || user?.role === 'fabricant' || user?.role === 'editeur')) {
-      setLoadingUsers(true);
-      usersApi
-        .getAll()
-        .then((response) => setAvailableUsers(response.users.filter((u: User) => u.id !== user?.id)))
-        .catch((error) => {
-          console.error('Failed to load users:', error);
-        })
-        .finally(() => setLoadingUsers(false));
+    // Reset users when publisher changes
+    setAvailableUsers([]);
+    setSelectedUserIds([]);
+
+    if (!formData.publisher_id || formData.publisher_id === 'none') {
+      return;
     }
-  }, [open, user?.role, user?.id]);
+
+    setLoadingUsers(true);
+    publishersApi
+      .getById(parseInt(formData.publisher_id))
+      .then((response) => {
+        // Filter: exclude current user, exclude graphistes
+        const members = response.publisher.members || [];
+        const filtered = members.filter((m: { id: number; role: string }) =>
+          m.id !== user?.id && m.role !== 'graphiste'
+        );
+        setAvailableUsers(filtered as User[]);
+      })
+      .catch((error) => {
+        console.error('Failed to load publisher members:', error);
+      })
+      .finally(() => setLoadingUsers(false));
+  }, [formData.publisher_id, user?.id]);
 
   // Handle format selection
   const handleFormatChange = (formatLabel: string) => {
@@ -497,57 +510,72 @@ export function CreateProjectDialog({
           </div>
 
           {/* User assignment */}
-          {availableUsers.length > 0 && (
+          {showPublisherSelect && (
             <div className="space-y-3 pt-2 border-t">
               <Label className="text-base flex items-center gap-2">
                 <Users className="h-4 w-4" />
                 Membres du projet
               </Label>
-              <p className="text-xs text-muted-foreground">
-                Sélectionnez les utilisateurs qui travailleront sur ce projet
-              </p>
 
-              <Select
-                onValueChange={(value) => {
-                  const userId = parseInt(value);
-                  if (!selectedUserIds.includes(userId)) {
-                    setSelectedUserIds([...selectedUserIds, userId]);
-                  }
-                }}
-              >
-                <SelectTrigger disabled={loadingUsers}>
-                  <SelectValue placeholder={loadingUsers ? 'Chargement...' : 'Ajouter un membre'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableUsers
-                    .filter((u) => !selectedUserIds.includes(u.id))
-                    .map((u) => (
-                      <SelectItem key={u.id} value={String(u.id)}>
-                        {u.first_name} {u.last_name} ({u.role})
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              {!formData.publisher_id || formData.publisher_id === 'none' ? (
+                <p className="text-xs text-muted-foreground">
+                  Sélectionnez une maison d&apos;édition pour ajouter des membres
+                </p>
+              ) : availableUsers.length === 0 && !loadingUsers ? (
+                <p className="text-xs text-muted-foreground">
+                  Aucun membre disponible dans cette maison d&apos;édition
+                  <br />
+                  <span className="text-amber-600">Les graphistes recevront un lien par email</span>
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Membres de la maison d&apos;édition (hors graphistes)
+                  </p>
 
-              {selectedUserIds.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {selectedUserIds.map((userId) => {
-                    const selectedUser = availableUsers.find((u) => u.id === userId);
-                    if (!selectedUser) return null;
-                    return (
-                      <Badge key={userId} variant="secondary" className="flex items-center gap-1">
-                        {selectedUser.first_name} {selectedUser.last_name}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedUserIds(selectedUserIds.filter((id) => id !== userId))}
-                          className="ml-1 hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
+                  <Select
+                    onValueChange={(value) => {
+                      const userId = parseInt(value);
+                      if (!selectedUserIds.includes(userId)) {
+                        setSelectedUserIds([...selectedUserIds, userId]);
+                      }
+                    }}
+                  >
+                    <SelectTrigger disabled={loadingUsers}>
+                      <SelectValue placeholder={loadingUsers ? 'Chargement...' : 'Ajouter un membre'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableUsers
+                        .filter((u) => !selectedUserIds.includes(u.id))
+                        .map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>
+                            {u.first_name} {u.last_name} ({u.role})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+
+                  {selectedUserIds.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedUserIds.map((userId) => {
+                        const selectedUser = availableUsers.find((u) => u.id === userId);
+                        if (!selectedUser) return null;
+                        return (
+                          <Badge key={userId} variant="secondary" className="flex items-center gap-1">
+                            {selectedUser.first_name} {selectedUser.last_name}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedUserIds(selectedUserIds.filter((id) => id !== userId))}
+                              className="ml-1 hover:text-destructive"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
