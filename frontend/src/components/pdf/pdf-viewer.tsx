@@ -248,14 +248,19 @@ export function PDFViewer({
                   const pos = parsePosition(annotation.position);
                   if (!pos) return null;
 
-                  // Highlight annotation (rectangle)
-                  if (annotation.type === 'highlight' && pos.width && pos.height) {
+                  // Check if it's a highlight with dimensions
+                  const isHighlight = annotation.type === 'highlight' &&
+                    pos.width !== undefined && pos.width > 0 &&
+                    pos.height !== undefined && pos.height > 0;
+
+                  // Highlight annotation (rectangle overlay)
+                  if (isHighlight) {
                     return (
                       <div
                         key={annotation.id}
                         className={cn(
-                          'absolute pointer-events-auto cursor-pointer transition-opacity',
-                          annotation.resolved ? 'opacity-30' : 'opacity-50 hover:opacity-70'
+                          'absolute pointer-events-auto cursor-pointer',
+                          annotation.resolved ? 'opacity-30' : 'opacity-60 hover:opacity-80'
                         )}
                         style={{
                           left: `${pos.x}%`,
@@ -264,6 +269,7 @@ export function PDFViewer({
                           height: `${pos.height}%`,
                           backgroundColor: annotation.color || '#FFFF00',
                           zIndex: 50,
+                          mixBlendMode: 'multiply',
                         }}
                         onClick={(e) => {
                           e.stopPropagation();

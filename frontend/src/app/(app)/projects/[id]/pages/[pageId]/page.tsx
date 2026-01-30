@@ -8,6 +8,7 @@ import { projectsApi } from '@/lib/api/projects';
 import { annotationsApi, CreateAnnotationData } from '@/lib/api/annotations';
 import { filesApi } from '@/lib/api/files';
 import { useAuth } from '@/hooks/use-auth';
+import { cn } from '@/lib/utils';
 import { Header } from '@/components/layout/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -285,9 +286,45 @@ export default function PageDetailPage({ params }: PageDetailProps) {
       </Header>
 
       <main className="flex-1 p-6">
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Main viewer */}
-          <div className="lg:col-span-2 space-y-4">
+        <div className="flex gap-4">
+          {/* Thumbnail navigation sidebar */}
+          <div className="hidden lg:block w-32 shrink-0">
+            <div className="sticky top-6 space-y-2 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Pages</p>
+              {allPages.map((p, idx) => (
+                <button
+                  key={p.id}
+                  onClick={() => goToPage(idx)}
+                  className={cn(
+                    'w-full rounded-md border overflow-hidden transition-all hover:ring-2 hover:ring-primary',
+                    p.id === pageIdNum ? 'ring-2 ring-primary' : 'opacity-70 hover:opacity-100'
+                  )}
+                >
+                  <div className="aspect-[3/4] bg-muted relative">
+                    {p.latest_file_id ? (
+                      <img
+                        src={filesApi.getThumbnailUrl(p.latest_file_id)}
+                        alt={`Page ${p.page_number}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <FileText className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-0.5 text-center">
+                      {p.page_number}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Main content area */}
+          <div className="flex-1 grid gap-6 lg:grid-cols-3">
+            {/* Main viewer */}
+            <div className="lg:col-span-2 space-y-4">
             <Card>
               <CardContent className="p-0 overflow-hidden">
                 {/* PDF Viewer or Image viewer */}
@@ -595,6 +632,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                 )}
               </TabsContent>
             </Tabs>
+          </div>
           </div>
         </div>
       </main>
