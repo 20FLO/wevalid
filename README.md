@@ -3,6 +3,16 @@
 Application de gestion de workflow pour la production éditoriale (livres, magazines).
 
 **Production** : `https://wevalid.rmax.synology.me`
+**Landing Page** : `https://wevalid.fr` (Vercel)
+
+## Fonctionnalités principales
+
+- **Annotations PDF** : Commentaires, surlignage avec export XFDF pour Acrobat
+- **Workflow automatisé** : 13 statuts de page avec transitions basées sur les rôles
+- **Collaboration multi-rôles** : Auteur, éditeur, graphiste, photograveur, fabricant, admin
+- **Verrouillage BAT** : Pages validées automatiquement protégées
+- **Dashboard temps réel** : Statistiques et suivi d'avancement
+- **Maisons d'édition** : Gestion multi-éditeurs avec contrôle d'accès
 
 ---
 
@@ -514,10 +524,29 @@ maquette_validee_photogravure     │
        ↓ photograveur
 en_bat
        ↓ photograveur/editeur
+bat_valide 🔒 (page verrouillée)
+       ↓ editeur/fabricant
+dernieres_corrections (débloque la page)
+       ↓ graphiste/editeur
 bat_valide
        ↓ editeur/fabricant
-pdf_hd_ok (final)
+envoye_imprimeur 🔒 (final)
 ```
+
+### Pages verrouillées
+
+Les pages avec statut `bat_valide` ou `envoye_imprimeur` sont **verrouillées** :
+- Annotations désactivées
+- Upload de fichiers désactivé
+- Indicateur visuel de verrouillage
+
+Pour débloquer une page BAT, passez-la au statut `dernieres_corrections`.
+
+**Note :** Les admins peuvent modifier les pages verrouillées.
+
+### Règle PDF
+
+Une page contenant un fichier PDF ne peut pas être remise au statut `attente_elements` (sauf par un admin).
 
 ---
 
