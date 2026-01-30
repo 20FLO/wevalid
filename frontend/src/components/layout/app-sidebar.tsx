@@ -31,6 +31,7 @@ import {
   LogOut,
   ChevronUp,
   BookOpen,
+  Building2,
 } from 'lucide-react';
 
 const mainNavItems = [
@@ -48,6 +49,12 @@ const mainNavItems = [
 
 const adminNavItems = [
   {
+    title: 'Maisons d\'édition',
+    url: '/publishers',
+    icon: Building2,
+    roles: ['admin', 'fabricant'],
+  },
+  {
     title: 'Utilisateurs',
     url: '/users',
     icon: Users,
@@ -63,7 +70,7 @@ export function AppSidebar() {
     ? `${user.first_name[0]}${user.last_name[0]}`.toUpperCase()
     : '??';
 
-  const isAdmin = user?.role === 'editeur' || user?.role === 'fabricant';
+  const isAdmin = user?.role === 'admin' || user?.role === 'editeur' || user?.role === 'fabricant';
 
   return (
     <Sidebar>
