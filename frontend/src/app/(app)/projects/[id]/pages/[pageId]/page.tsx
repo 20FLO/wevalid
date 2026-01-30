@@ -2,6 +2,7 @@
 
 import { use, useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { projectsApi } from '@/lib/api/projects';
 import { annotationsApi, CreateAnnotationData } from '@/lib/api/annotations';
@@ -47,6 +48,12 @@ import {
 } from 'lucide-react';
 import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus } from '@/types';
 import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS } from '@/types';
+
+// Import PDF viewer dynamically to avoid SSR issues
+const PDFViewer = dynamic(() => import('@/components/pdf/pdf-viewer').then(mod => ({ default: mod.PDFViewer })), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[500px] w-full" />,
+});
 
 interface PageDetailProps {
   params: Promise<{ id: string; pageId: string }>;
@@ -247,6 +254,10 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     ? filesApi.getThumbnailUrl(currentFile.id)
     : null;
 
+  // Check if current file is a PDF
+  const isPDF = currentFile?.file_type === 'application/pdf' || currentFile?.original_filename?.endsWith('.pdf');
+  const pdfUrl = currentFile ? filesApi.getDownloadUrl(currentFile.id) : null;
+
   return (
     <>
       <Header
@@ -284,46 +295,61 @@ export default function PageDetailPage({ params }: PageDetailProps) {
           {/* Main viewer */}
           <div className="lg:col-span-2 space-y-4">
             <Card>
-              <CardContent className="p-4">
-                {/* Image viewer with click-to-annotate */}
-                <div
-                  className="relative cursor-crosshair bg-muted rounded-lg overflow-hidden"
-                  style={{ minHeight: '500px' }}
-                  onClick={handleImageClick}
-                >
-                  {thumbnailUrl ? (
-                    <img
-                      src={thumbnailUrl}
-                      alt={`Page ${page.page_number}`}
-                      className="w-full h-auto"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-[500px]">
-                      <FileText className="h-16 w-16 text-muted-foreground" />
+              <CardContent className="p-0 overflow-hidden">
+                {/* PDF Viewer or Image viewer */}
+                {isPDF && pdfUrl ? (
+                  <PDFViewer
+                    url={pdfUrl}
+                    annotations={annotations}
+                    onPageClick={(pos) => {
+                      setClickPosition({ x: pos.x, y: pos.y });
+                      setShowAnnotationDialog(true);
+                    }}
+                    className="min-h-[600px]"
+                  />
+                ) : (
+                  <>
+                    {/* Image viewer with click-to-annotate */}
+                    <div
+                      className="relative cursor-crosshair bg-muted rounded-lg overflow-hidden"
+                      style={{ minHeight: '500px' }}
+                      onClick={handleImageClick}
+                    >
+                      {thumbnailUrl ? (
+                        <img
+                          src={thumbnailUrl}
+                          alt={`Page ${page.page_number}`}
+                          className="w-full h-auto"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-[500px]">
+                          <FileText className="h-16 w-16 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      {/* Annotation markers */}
+                      {annotations.map((annotation) =>
+                        annotation.position ? (
+                          <div
+                            key={annotation.id}
+                            className="absolute w-6 h-6 -ml-3 -mt-3 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold cursor-pointer hover:scale-110 transition-transform"
+                            style={{
+                              left: `${annotation.position.x}%`,
+                              top: `${annotation.position.y}%`,
+                            }}
+                            title={annotation.content}
+                          >
+                            {annotation.resolved ? '✓' : annotations.indexOf(annotation) + 1}
+                          </div>
+                        ) : null
+                      )}
                     </div>
-                  )}
 
-                  {/* Annotation markers */}
-                  {annotations.map((annotation) =>
-                    annotation.position ? (
-                      <div
-                        key={annotation.id}
-                        className="absolute w-6 h-6 -ml-3 -mt-3 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold cursor-pointer hover:scale-110 transition-transform"
-                        style={{
-                          left: `${annotation.position.x}%`,
-                          top: `${annotation.position.y}%`,
-                        }}
-                        title={annotation.content}
-                      >
-                        {annotation.resolved ? '✓' : annotations.indexOf(annotation) + 1}
-                      </div>
-                    ) : null
-                  )}
-                </div>
-
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  Cliquez sur l&apos;image pour ajouter une annotation
-                </p>
+                    <p className="text-xs text-muted-foreground p-2 text-center">
+                      Cliquez sur l&apos;image pour ajouter une annotation
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
 

@@ -26,7 +26,8 @@ app.use(cors({
 
 // Middlewares de sécurité
 app.use(helmet({
-  contentSecurityPolicy: false
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // Permet l'accès aux images/fichiers depuis d'autres origines
 }));
 
 // Rate limiting global
