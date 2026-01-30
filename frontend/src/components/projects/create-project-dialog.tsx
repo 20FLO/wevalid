@@ -1,13 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { projectsApi } from '@/lib/api/projects';
 import { publishersApi } from '@/lib/api/publishers';
+import { projectFilesApi } from '@/lib/api/project-files';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -24,7 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, FileText, Image, X, Upload } from 'lucide-react';
 import type { Publisher } from '@/types';
 
 // Predefined book formats
@@ -66,6 +69,14 @@ export function CreateProjectDialog({
     height_mm: '',
   });
 
+  // File upload state
+  const [wantDocuments, setWantDocuments] = useState(false);
+  const [wantImages, setWantImages] = useState(false);
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
+
   // Load publishers when dialog opens
   useEffect(() => {
     if (open && (user?.role === 'admin' || user?.role === 'fabricant')) {
@@ -93,12 +104,51 @@ export function CreateProjectDialog({
     }
   };
 
+  // Handle file drops
+  const handleDocumentDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).filter(
+      f => f.type.includes('word') || f.type.includes('rtf') || f.type === 'application/pdf' || f.name.endsWith('.rtf')
+    );
+    setDocumentFiles(prev => [...prev, ...files]);
+  }, []);
+
+  const handleImageDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    setImageFiles(prev => [...prev, ...files]);
+  }, []);
+
+  const handleDocumentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setDocumentFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setImageFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const removeDocument = (index: number) => {
+    setDocumentFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeImage = (index: number) => {
+    setImageFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setUploadProgress(0);
+    setUploadStatus('');
 
     try {
-      await projectsApi.create({
+      // 1. Create the project
+      setUploadStatus('Création du projet...');
+      const result = await projectsApi.create({
         title: formData.title,
         isbn: formData.isbn || undefined,
         description: formData.description || undefined,
@@ -107,7 +157,38 @@ export function CreateProjectDialog({
         width_mm: formData.width_mm ? parseInt(formData.width_mm) : undefined,
         height_mm: formData.height_mm ? parseInt(formData.height_mm) : undefined,
       });
-      toast.success('Projet créé avec succès');
+
+      const projectId = result.project.id;
+      setUploadProgress(20);
+
+      // 2. Upload document files if any
+      if (documentFiles.length > 0) {
+        setUploadStatus(`Upload des documents (${documentFiles.length} fichiers)...`);
+        await projectFilesApi.upload(projectId, documentFiles, {
+          category: 'document',
+          description: 'Documents texte importés à la création du projet',
+        });
+        setUploadProgress(60);
+      }
+
+      // 3. Upload image files if any
+      if (imageFiles.length > 0) {
+        setUploadStatus(`Upload des images (${imageFiles.length} fichiers)...`);
+        await projectFilesApi.upload(projectId, imageFiles, {
+          category: 'image',
+          description: 'Images importées à la création du projet',
+        });
+        setUploadProgress(100);
+      }
+
+      const totalFiles = documentFiles.length + imageFiles.length;
+      if (totalFiles > 0) {
+        toast.success(`Projet créé avec ${totalFiles} fichier(s)`);
+      } else {
+        toast.success('Projet créé avec succès');
+      }
+
+      // Reset form
       setFormData({
         title: '',
         isbn: '',
@@ -118,6 +199,12 @@ export function CreateProjectDialog({
         height_mm: '',
       });
       setSelectedFormat('Personnalisé');
+      setWantDocuments(false);
+      setWantImages(false);
+      setDocumentFiles([]);
+      setImageFiles([]);
+      setUploadProgress(0);
+      setUploadStatus('');
       onSuccess();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erreur lors de la création');
@@ -252,6 +339,131 @@ export function CreateProjectDialog({
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />
           </div>
+
+          {/* File upload options */}
+          <div className="space-y-3 pt-2 border-t">
+            <Label className="text-base">Fichiers à importer</Label>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="want-documents"
+                checked={wantDocuments}
+                onCheckedChange={(checked) => setWantDocuments(checked === true)}
+              />
+              <label
+                htmlFor="want-documents"
+                className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
+              >
+                <FileText className="h-4 w-4" />
+                Textes (Word, RTF, PDF)
+              </label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="want-images"
+                checked={wantImages}
+                onCheckedChange={(checked) => setWantImages(checked === true)}
+              />
+              <label
+                htmlFor="want-images"
+                className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
+              >
+                <Image className="h-4 w-4" />
+                Images (JPEG, PNG, TIFF...)
+              </label>
+            </div>
+
+            {/* Document upload zone */}
+            {wantDocuments && (
+              <div className="space-y-2">
+                <div
+                  className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                  onDrop={handleDocumentDrop}
+                  onDragOver={(e) => e.preventDefault()}
+                  onClick={() => document.getElementById('doc-input')?.click()}
+                >
+                  <Upload className="h-6 w-6 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    Glissez vos documents ici ou cliquez pour sélectionner
+                  </p>
+                  <input
+                    id="doc-input"
+                    type="file"
+                    multiple
+                    accept=".doc,.docx,.rtf,.pdf"
+                    className="hidden"
+                    onChange={handleDocumentSelect}
+                  />
+                </div>
+                {documentFiles.length > 0 && (
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {documentFiles.map((file, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm bg-muted rounded px-2 py-1">
+                        <span className="truncate flex-1">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeDocument(i)}
+                          className="ml-2 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Image upload zone */}
+            {wantImages && (
+              <div className="space-y-2">
+                <div
+                  className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                  onDrop={handleImageDrop}
+                  onDragOver={(e) => e.preventDefault()}
+                  onClick={() => document.getElementById('img-input')?.click()}
+                >
+                  <Upload className="h-6 w-6 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    Glissez vos images ici ou cliquez pour sélectionner
+                  </p>
+                  <input
+                    id="img-input"
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageSelect}
+                  />
+                </div>
+                {imageFiles.length > 0 && (
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {imageFiles.map((file, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm bg-muted rounded px-2 py-1">
+                        <span className="truncate flex-1">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(i)}
+                          className="ml-2 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Upload progress */}
+          {isLoading && uploadStatus && (
+            <div className="space-y-2">
+              <Progress value={uploadProgress} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center">{uploadStatus}</p>
+            </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
