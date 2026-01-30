@@ -7,3 +7,4 @@ export { filesApi } from './files';
 export { annotationsApi } from './annotations';
 export { usersApi } from './users';
 export { projectFilesApi } from './project-files';
+export { searchApi } from './search';

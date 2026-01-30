@@ -166,7 +166,7 @@ export function CreateProjectDialog({
         setUploadStatus(`Upload des documents (${documentFiles.length} fichiers)...`);
         await projectFilesApi.upload(projectId, documentFiles, {
           category: 'document',
-          description: 'Documents texte importés à la création du projet',
+          description: `Projet #${projectId} - ${formData.title}`,
         });
         setUploadProgress(60);
       }
@@ -176,7 +176,7 @@ export function CreateProjectDialog({
         setUploadStatus(`Upload des images (${imageFiles.length} fichiers)...`);
         await projectFilesApi.upload(projectId, imageFiles, {
           category: 'image',
-          description: 'Images importées à la création du projet',
+          description: `Projet #${projectId} - ${formData.title}`,
         });
         setUploadProgress(100);
       }
