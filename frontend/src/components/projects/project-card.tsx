@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import type { Project } from '@/types';
-import { FileText, Users, ArrowRight } from 'lucide-react';
+import { FileText, Users, ArrowRight, Building2 } from 'lucide-react';
 
 interface ProjectCardProps {
   project: Project;
@@ -39,6 +39,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg leading-tight">{project.title}</CardTitle>
+            {project.publisher_name && (
+              <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Building2 className="h-3 w-3" />
+                {project.publisher_name}
+              </p>
+            )}
             {project.isbn && (
               <p className="text-sm text-muted-foreground">ISBN: {project.isbn}</p>
             )}

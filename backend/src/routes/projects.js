@@ -11,24 +11,35 @@ router.use(authenticateToken);
 // Lister tous les projets
 router.get('/', async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 20 } = req.query;
+    const { status, search, publisher_id, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT p.*, 
+      SELECT p.*,
              u.first_name || ' ' || u.last_name as creator_name,
+             pub.name as publisher_name,
              COUNT(DISTINCT pg.id) as total_pages_count,
              COUNT(DISTINCT CASE WHEN pg.status = 'bat_valide' THEN pg.id END) as validated_pages_count
       FROM projects p
       LEFT JOIN users u ON p.created_by = u.id
+      LEFT JOIN publishers pub ON p.publisher_id = pub.id
       LEFT JOIN pages pg ON p.id = pg.project_id
       WHERE 1=1
     `;
     const params = [];
     let paramIndex = 1;
 
-    // Admin voit tout, éditeur et fabricant aussi, les autres seulement leurs projets
-    if (!['admin', 'editeur', 'fabricant'].includes(req.user.role)) {
+    // Admin voit tout, éditeur aussi
+    // Fabricant voit les projets de ses maisons d'édition
+    // Autres rôles seulement les projets où ils sont membres
+    if (req.user.role === 'fabricant') {
+      query += ` AND (
+        p.publisher_id IN (SELECT publisher_id FROM user_publishers WHERE user_id = $${paramIndex})
+        OR p.id IN (SELECT project_id FROM project_members WHERE user_id = $${paramIndex})
+      )`;
+      params.push(req.user.id);
+      paramIndex++;
+    } else if (!['admin', 'editeur'].includes(req.user.role)) {
       query += ` AND p.id IN (
         SELECT DISTINCT project_id FROM project_members WHERE user_id = $${paramIndex}
       )`;
@@ -48,21 +59,54 @@ router.get('/', async (req, res) => {
       paramIndex++;
     }
 
-    query += ` GROUP BY p.id, u.first_name, u.last_name ORDER BY p.updated_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    if (publisher_id) {
+      query += ` AND p.publisher_id = $${paramIndex}`;
+      params.push(publisher_id);
+      paramIndex++;
+    }
+
+    query += ` GROUP BY p.id, u.first_name, u.last_name, pub.name ORDER BY p.updated_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     const result = await pool.query(query, params);
 
-    // Compter le total
-    const countQuery = `SELECT COUNT(DISTINCT p.id) FROM projects p WHERE 1=1 ${
-      !['admin', 'editeur', 'fabricant'].includes(req.user.role)
-        ? 'AND p.id IN (SELECT DISTINCT project_id FROM project_members WHERE user_id = $1)' 
-        : ''
-    }`;
-    const countResult = await pool.query(
-      countQuery, 
-      !['admin', 'editeur', 'fabricant'].includes(req.user.role) ? [req.user.id] : []
-    );
+    // Compter le total avec les mêmes filtres
+    let countParams = [];
+    let countParamIndex = 1;
+    let countQuery = `SELECT COUNT(DISTINCT p.id) FROM projects p WHERE 1=1`;
+
+    if (req.user.role === 'fabricant') {
+      countQuery += ` AND (
+        p.publisher_id IN (SELECT publisher_id FROM user_publishers WHERE user_id = $${countParamIndex})
+        OR p.id IN (SELECT project_id FROM project_members WHERE user_id = $${countParamIndex})
+      )`;
+      countParams.push(req.user.id);
+      countParamIndex++;
+    } else if (!['admin', 'editeur'].includes(req.user.role)) {
+      countQuery += ` AND p.id IN (SELECT DISTINCT project_id FROM project_members WHERE user_id = $${countParamIndex})`;
+      countParams.push(req.user.id);
+      countParamIndex++;
+    }
+
+    if (status) {
+      countQuery += ` AND p.status = $${countParamIndex}`;
+      countParams.push(status);
+      countParamIndex++;
+    }
+
+    if (search) {
+      countQuery += ` AND (p.title ILIKE $${countParamIndex} OR p.isbn ILIKE $${countParamIndex})`;
+      countParams.push(`%${search}%`);
+      countParamIndex++;
+    }
+
+    if (publisher_id) {
+      countQuery += ` AND p.publisher_id = $${countParamIndex}`;
+      countParams.push(publisher_id);
+      countParamIndex++;
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
 
     res.json({
       projects: result.rows,
@@ -84,15 +128,17 @@ router.get('/:id', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT p.*, 
+      `SELECT p.*,
               u.first_name || ' ' || u.last_name as creator_name,
+              pub.name as publisher_name,
               COUNT(DISTINCT pg.id) as total_pages_count,
               COUNT(DISTINCT CASE WHEN pg.status = 'bat_valide' THEN pg.id END) as validated_pages_count
        FROM projects p
        LEFT JOIN users u ON p.created_by = u.id
+       LEFT JOIN publishers pub ON p.publisher_id = pub.id
        LEFT JOIN pages pg ON p.id = pg.project_id
        WHERE p.id = $1
-       GROUP BY p.id, u.first_name, u.last_name`,
+       GROUP BY p.id, u.first_name, u.last_name, pub.name`,
       [id]
     );
 
@@ -102,8 +148,22 @@ router.get('/:id', async (req, res) => {
 
     const project = result.rows[0];
 
-    // Admin voit tout, éditeur et fabricant aussi, les autres doivent être membres
-    if (!['admin', 'editeur', 'fabricant'].includes(req.user.role)) {
+    // Admin et éditeur voient tout
+    // Fabricant voit si le projet est dans une de ses maisons ou s'il est membre
+    // Autres doivent être membres
+    if (req.user.role === 'fabricant') {
+      const accessCheck = await pool.query(
+        `SELECT 1 FROM projects p
+         WHERE p.id = $1 AND (
+           p.publisher_id IN (SELECT publisher_id FROM user_publishers WHERE user_id = $2)
+           OR p.id IN (SELECT project_id FROM project_members WHERE user_id = $2)
+         )`,
+        [id, req.user.id]
+      );
+      if (accessCheck.rows.length === 0) {
+        return res.status(403).json({ error: { message: 'Accès refusé à ce projet' } });
+      }
+    } else if (!['admin', 'editeur'].includes(req.user.role)) {
       const memberCheck = await pool.query(
         'SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2',
         [id, req.user.id]
@@ -135,7 +195,18 @@ router.get('/:id', async (req, res) => {
 
 // Créer un nouveau projet (admin + fabricant + éditeurs)
 router.post('/', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schemas.createProject), async (req, res) => {
-  const { title, isbn, description, total_pages, format } = req.validatedBody;
+  const { title, isbn, description, total_pages, publisher_id, width_mm, height_mm } = req.validatedBody;
+
+  // Vérifier que le fabricant a accès à la maison d'édition
+  if (req.user.role === 'fabricant' && publisher_id) {
+    const accessCheck = await pool.query(
+      'SELECT 1 FROM user_publishers WHERE publisher_id = $1 AND user_id = $2',
+      [publisher_id, req.user.id]
+    );
+    if (accessCheck.rows.length === 0) {
+      return res.status(403).json({ error: { message: 'Vous n\'avez pas accès à cette maison d\'édition' } });
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -143,10 +214,10 @@ router.post('/', authorizeRoles('admin', 'editeur', 'fabricant'), validate(schem
 
     // Créer le projet
     const projectResult = await client.query(
-      `INSERT INTO projects (title, isbn, description, total_pages, format, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'draft', $6)
+      `INSERT INTO projects (title, isbn, description, total_pages, publisher_id, width_mm, height_mm, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8)
        RETURNING *`,
-      [title, isbn, description, total_pages, format, req.user.id]
+      [title, isbn, description, total_pages, publisher_id, width_mm, height_mm, req.user.id]
     );
 
     const project = projectResult.rows[0];

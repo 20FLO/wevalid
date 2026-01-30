@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useProjects } from '@/hooks/use-projects';
 import { useAuth } from '@/hooks/use-auth';
+import { publishersApi } from '@/lib/api/publishers';
 import { Header } from '@/components/layout/header';
 import { ProjectCard } from '@/components/projects/project-card';
 import { Button } from '@/components/ui/button';
@@ -16,21 +17,39 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, FolderKanban } from 'lucide-react';
+import { Plus, Search, FolderKanban, Building2 } from 'lucide-react';
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
+import type { Publisher } from '@/types';
 
 export default function ProjectsPage() {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [publisherFilter, setPublisherFilter] = useState<string>('all');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [publishers, setPublishers] = useState<Publisher[]>([]);
+  const [loadingPublishers, setLoadingPublishers] = useState(false);
 
   const { projects, isLoading, refetch } = useProjects({
     search: search || undefined,
     status: statusFilter !== 'all' ? statusFilter : undefined,
+    publisher_id: publisherFilter !== 'all' ? parseInt(publisherFilter) : undefined,
   });
 
-  const canCreateProject = user?.role === 'editeur' || user?.role === 'fabricant';
+  const canCreateProject = user?.role === 'admin' || user?.role === 'editeur' || user?.role === 'fabricant';
+  const showPublisherFilter = user?.role === 'admin' || user?.role === 'fabricant';
+
+  // Load publishers for filter
+  useEffect(() => {
+    if (showPublisherFilter) {
+      setLoadingPublishers(true);
+      publishersApi
+        .getAll()
+        .then((response) => setPublishers(response.publishers))
+        .catch((error) => console.error('Failed to load publishers:', error))
+        .finally(() => setLoadingPublishers(false));
+    }
+  }, [showPublisherFilter]);
 
   return (
     <>
@@ -55,6 +74,22 @@ export default function ProjectsPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {showPublisherFilter && publishers.length > 0 && (
+            <Select value={publisherFilter} onValueChange={setPublisherFilter} disabled={loadingPublishers}>
+              <SelectTrigger className="w-full sm:w-56">
+                <Building2 className="mr-2 h-4 w-4" />
+                <SelectValue placeholder="Toutes les maisons" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes les maisons</SelectItem>
+                {publishers.map((publisher) => (
+                  <SelectItem key={publisher.id} value={String(publisher.id)}>
+                    {publisher.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Tous les statuts" />
@@ -96,11 +131,11 @@ export default function ProjectsPage() {
               <FolderKanban className="h-12 w-12 text-muted-foreground" />
               <p className="mt-4 text-lg font-medium">Aucun projet trouvé</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {search || statusFilter !== 'all'
+                {search || statusFilter !== 'all' || publisherFilter !== 'all'
                   ? 'Essayez de modifier vos filtres'
                   : 'Créez votre premier projet pour commencer'}
               </p>
-              {canCreateProject && !search && statusFilter === 'all' && (
+              {canCreateProject && !search && statusFilter === 'all' && publisherFilter === 'all' && (
                 <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Créer un projet

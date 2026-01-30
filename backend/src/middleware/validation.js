@@ -40,7 +40,7 @@ const schemas = {
     password: Joi.string().min(8).required(),
     first_name: Joi.string().min(2).max(50).required(),
     last_name: Joi.string().min(2).max(50).required(),
-    role: Joi.string().valid('auteur', 'editeur', 'photograveur', 'fabricant', 'graphiste').required()
+    role: Joi.string().valid('admin', 'auteur', 'editeur', 'photograveur', 'fabricant', 'graphiste').required()
   }),
 
   // Projet
@@ -49,7 +49,9 @@ const schemas = {
     isbn: Joi.string().pattern(/^[0-9-]{10,17}$/).allow('', null),
     description: Joi.string().max(1000).allow('', null),
     total_pages: Joi.number().integer().min(1).max(10000).required(),
-    format: Joi.string().max(50).allow('', null)
+    publisher_id: Joi.number().integer().allow(null),
+    width_mm: Joi.number().integer().min(50).max(1000).allow(null),
+    height_mm: Joi.number().integer().min(50).max(1000).allow(null)
   }),
 
   updateProject: Joi.object({
@@ -57,8 +59,21 @@ const schemas = {
     isbn: Joi.string().pattern(/^[0-9-]{10,17}$/).allow('', null),
     description: Joi.string().max(1000).allow('', null),
     total_pages: Joi.number().integer().min(1).max(10000),
-    format: Joi.string().max(50).allow('', null),
+    publisher_id: Joi.number().integer().allow(null),
+    width_mm: Joi.number().integer().min(50).max(1000).allow(null),
+    height_mm: Joi.number().integer().min(50).max(1000).allow(null),
     status: Joi.string().valid('draft', 'in_progress', 'bat', 'completed', 'archived')
+  }),
+
+  // Publisher (Maison d'édition)
+  createPublisher: Joi.object({
+    name: Joi.string().min(1).max(200).required(),
+    description: Joi.string().max(1000).allow('', null)
+  }),
+
+  updatePublisher: Joi.object({
+    name: Joi.string().min(1).max(200),
+    description: Joi.string().max(1000).allow('', null)
   }),
 
   // Page - Statuts mis à jour

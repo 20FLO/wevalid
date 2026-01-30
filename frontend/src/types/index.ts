@@ -1,6 +1,28 @@
 // Types pour l'API Wevalid
 
-export type UserRole = 'auteur' | 'editeur' | 'photograveur' | 'fabricant' | 'graphiste';
+export type UserRole = 'admin' | 'auteur' | 'editeur' | 'photograveur' | 'fabricant' | 'graphiste';
+
+// Publisher (Maison d'édition)
+export interface Publisher {
+  id: number;
+  name: string;
+  description?: string;
+  members_count?: number;
+  projects_count?: number;
+  created_at: string;
+  updated_at: string;
+  members?: PublisherMember[];
+}
+
+export interface PublisherMember {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: UserRole;
+  publisher_role: 'admin' | 'member';
+  joined_at: string;
+}
 
 export interface User {
   id: number;
@@ -36,6 +58,10 @@ export interface Project {
   total_pages_count?: string;
   validated_pages_count?: string;
   members?: ProjectMember[];
+  publisher_id?: number;
+  publisher_name?: string;
+  width_mm?: number;
+  height_mm?: number;
 }
 
 export interface ProjectMember {
@@ -97,6 +123,7 @@ export interface Page {
   annotations_count?: string;
   files?: FileItem[];
   annotations?: Annotation[];
+  latest_file_id?: number;
 }
 
 export interface FileItem {

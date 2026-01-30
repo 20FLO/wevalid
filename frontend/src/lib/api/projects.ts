@@ -15,6 +15,7 @@ export interface ProjectsResponse {
 export interface ProjectFilters {
   status?: string;
   search?: string;
+  publisher_id?: number;
   page?: number;
   limit?: number;
 }
@@ -24,6 +25,9 @@ export interface CreateProjectData {
   isbn?: string;
   description?: string;
   total_pages: number;
+  publisher_id?: number;
+  width_mm?: number;
+  height_mm?: number;
 }
 
 export const projectsApi = {
@@ -31,6 +35,7 @@ export const projectsApi = {
     const params = new URLSearchParams();
     if (filters?.status) params.append('status', filters.status);
     if (filters?.search) params.append('search', filters.search);
+    if (filters?.publisher_id) params.append('publisher_id', String(filters.publisher_id));
     if (filters?.page) params.append('page', String(filters.page));
     if (filters?.limit) params.append('limit', String(filters.limit));
 

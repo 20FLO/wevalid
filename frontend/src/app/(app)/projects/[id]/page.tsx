@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState } from 'react';
 import Link from 'next/link';
 import { useProject, useProjectPages, useWorkflowStats } from '@/hooks/use-projects';
 import { Header } from '@/components/layout/header';
@@ -11,7 +11,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { PageStatus, PAGE_STATUS_LABELS, PAGE_STATUS_COLORS } from '@/types';
-import { ArrowLeft, Users, FileText, Settings } from 'lucide-react';
+import { ArrowLeft, Users, FileText, Settings, Building2 } from 'lucide-react';
+import { PageThumbnail } from '@/components/projects/page-thumbnail';
+import {
+  PageFilters,
+  useFilteredPages,
+  SortField,
+  SortDirection,
+} from '@/components/projects/page-filters';
 
 interface ProjectPageProps {
   params: Promise<{ id: string }>;
@@ -24,6 +31,14 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   const { project, isLoading: projectLoading } = useProject(projectId);
   const { pages, isLoading: pagesLoading } = useProjectPages(projectId);
   const { stats } = useWorkflowStats(projectId);
+
+  // Page filtering/sorting state
+  const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
+  const [sortField, setSortField] = useState<SortField>('page_number');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  // Apply filters and sorting
+  const filteredPages = useFilteredPages(pages, statusFilter, sortField, sortDirection);
 
   if (projectLoading) {
     return (
@@ -54,6 +69,11 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   const validatedPages = parseInt(project.validated_pages_count || '0');
   const progress = totalPages > 0 ? Math.round((validatedPages / totalPages) * 100) : 0;
 
+  // Format display string
+  const formatDisplay = project.width_mm && project.height_mm
+    ? `${project.width_mm} × ${project.height_mm} mm`
+    : null;
+
   return (
     <>
       <Header title={project.title} description={project.isbn ? `ISBN: ${project.isbn}` : undefined}>
@@ -67,7 +87,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
       <main className="flex-1 space-y-6 p-6">
         {/* Project Overview */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">Progression</CardTitle>
@@ -121,6 +141,35 @@ export default function ProjectPage({ params }: ProjectPageProps) {
               )}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Format</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {formatDisplay ? (
+                <>
+                  <div className="text-lg font-bold">{formatDisplay}</div>
+                  {project.publisher_name && (
+                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Building2 className="h-3 w-3" />
+                      {project.publisher_name}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-lg font-medium text-muted-foreground">Non défini</div>
+                  {project.publisher_name && (
+                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Building2 className="h-3 w-3" />
+                      {project.publisher_name}
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Workflow Stats */}
@@ -164,41 +213,53 @@ export default function ProjectPage({ params }: ProjectPageProps) {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="pages" className="mt-4">
+          <TabsContent value="pages" className="mt-4 space-y-4">
+            {/* Filters */}
+            {pages.length > 0 && (
+              <PageFilters
+                pages={pages}
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+                sortField={sortField}
+                onSortFieldChange={setSortField}
+                sortDirection={sortDirection}
+                onSortDirectionChange={setSortDirection}
+              />
+            )}
+
+            {/* Pages Grid with Thumbnails */}
             {pagesLoading ? (
-              <div className="grid gap-2">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
+              <div className="grid gap-4 grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <Skeleton key={i} className="aspect-[210/297] w-full" />
                 ))}
               </div>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-                {pages.map((page) => (
+            ) : filteredPages.length > 0 ? (
+              <div className="grid gap-4 grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
+                {filteredPages.map((page) => (
                   <Link
                     key={page.id}
                     href={`/projects/${project.id}/pages/${page.id}`}
-                    className="group"
+                    className="block"
                   >
-                    <Card className="transition-shadow hover:shadow-md">
-                      <CardContent className="p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">Page {page.page_number}</span>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs ${PAGE_STATUS_COLORS[page.status]}`}
-                          >
-                            {PAGE_STATUS_LABELS[page.status].split(' ')[0]}
-                          </Badge>
-                        </div>
-                        <div className="mt-1 flex gap-2 text-xs text-muted-foreground">
-                          {page.files_count && <span>{page.files_count} fichiers</span>}
-                          {page.annotations_count && <span>{page.annotations_count} annot.</span>}
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <PageThumbnail
+                      pageNumber={page.page_number}
+                      status={page.status}
+                      fileId={page.latest_file_id}
+                      widthMm={project.width_mm}
+                      heightMm={project.height_mm}
+                    />
                   </Link>
                 ))}
               </div>
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  {statusFilter !== 'all'
+                    ? 'Aucune page ne correspond au filtre sélectionné'
+                    : 'Aucune page dans ce projet'}
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
 
@@ -234,9 +295,47 @@ export default function ProjectPage({ params }: ProjectPageProps) {
           <TabsContent value="settings" className="mt-4">
             <Card>
               <CardContent className="p-4">
-                <p className="text-muted-foreground">
-                  Paramètres du projet (à implémenter)
-                </p>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-medium">Informations du projet</h3>
+                    <dl className="mt-2 space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Titre</dt>
+                        <dd>{project.title}</dd>
+                      </div>
+                      {project.isbn && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">ISBN</dt>
+                          <dd>{project.isbn}</dd>
+                        </div>
+                      )}
+                      {project.publisher_name && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Maison d&apos;édition</dt>
+                          <dd>{project.publisher_name}</dd>
+                        </div>
+                      )}
+                      {formatDisplay && (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Format</dt>
+                          <dd>{formatDisplay}</dd>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Nombre de pages</dt>
+                        <dd>{project.total_pages}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Créé par</dt>
+                        <dd>{project.creator_name}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Créé le</dt>
+                        <dd>{new Date(project.created_at).toLocaleDateString('fr-FR')}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
