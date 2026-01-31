@@ -75,7 +75,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [page, setPage] = useState<Page | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<WorkflowHistory[]>([]);
-  const [allowedTransitions, setAllowedTransitions] = useState<string[]>([]);
+  const [allowedTransitions, setAllowedTransitions] = useState<Array<{ status: string; label: string } | string>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
@@ -694,11 +694,18 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         <SelectValue placeholder="Sélectionner un statut" />
                       </SelectTrigger>
                       <SelectContent>
-                        {allowedTransitions.map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {PAGE_STATUS_LABELS[status as PageStatus] || status}
-                          </SelectItem>
-                        ))}
+                        {allowedTransitions.map((transition) => {
+                          // Handle both object format {status, label} and string format
+                          const statusKey = typeof transition === 'string' ? transition : transition.status;
+                          const statusLabel = typeof transition === 'string'
+                            ? (PAGE_STATUS_LABELS[transition as PageStatus] || transition)
+                            : transition.label;
+                          return (
+                            <SelectItem key={statusKey} value={statusKey}>
+                              {statusLabel}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
