@@ -126,8 +126,25 @@ router.get('/:id', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT p.*, 
-              json_agg(DISTINCT jsonb_build_object('id', f.id, 'filename', f.filename, 'file_type', f.file_type, 'file_size', f.file_size, 'uploaded_at', f.uploaded_at)) FILTER (WHERE f.id IS NOT NULL) as files,
+      `SELECT p.*,
+              (
+                SELECT f2.id
+                FROM files f2
+                WHERE f2.page_id = p.id
+                  AND f2.is_current = true
+                ORDER BY f2.uploaded_at DESC
+                LIMIT 1
+              ) as latest_file_id,
+              json_agg(DISTINCT jsonb_build_object(
+                'id', f.id,
+                'filename', f.filename,
+                'original_filename', f.original_filename,
+                'file_type', f.file_type,
+                'file_size', f.file_size,
+                'uploaded_at', f.uploaded_at,
+                'is_current', f.is_current,
+                'version', f.version
+              )) FILTER (WHERE f.id IS NOT NULL) as files,
               json_agg(DISTINCT jsonb_build_object('id', a.id, 'type', a.type, 'content', a.content, 'created_by', a.created_by, 'created_at', a.created_at)) FILTER (WHERE a.id IS NOT NULL) as annotations
        FROM pages p
        LEFT JOIN files f ON p.id = f.page_id
