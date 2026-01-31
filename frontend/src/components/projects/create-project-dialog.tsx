@@ -76,6 +76,7 @@ export function CreateProjectDialog({
   const [wantImages, setWantImages] = useState(false);
   const [documentFiles, setDocumentFiles] = useState<File[]>([]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [sanitizeFilename, setSanitizeFilename] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
 
@@ -201,6 +202,7 @@ export function CreateProjectDialog({
         await projectFilesApi.upload(projectId, documentFiles, {
           category: 'document',
           description: `Projet #${projectId} - ${formData.title}`,
+          sanitizeFilename,
         });
         setUploadProgress(60);
       }
@@ -211,6 +213,7 @@ export function CreateProjectDialog({
         await projectFilesApi.upload(projectId, imageFiles, {
           category: 'image',
           description: `Projet #${projectId} - ${formData.title}`,
+          sanitizeFilename,
         });
         setUploadProgress(80);
       }
@@ -254,6 +257,7 @@ export function CreateProjectDialog({
       setWantImages(false);
       setDocumentFiles([]);
       setImageFiles([]);
+      setSanitizeFilename(false);
       setSelectedUserIds([]);
       setUploadProgress(0);
       setUploadStatus('');
@@ -505,6 +509,23 @@ export function CreateProjectDialog({
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Sanitize filename option */}
+            {(wantDocuments || wantImages) && (
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="sanitize-create"
+                  checked={sanitizeFilename}
+                  onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
+                />
+                <label
+                  htmlFor="sanitize-create"
+                  className="text-sm cursor-pointer"
+                >
+                  Simplifier noms de fichiers
+                </label>
               </div>
             )}
           </div>

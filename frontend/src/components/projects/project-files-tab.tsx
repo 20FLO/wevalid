@@ -33,6 +33,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import {
   Upload,
@@ -99,6 +100,7 @@ export function ProjectFilesTab({ projectId, files, onRefresh, isLoading }: Proj
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadCategory, setUploadCategory] = useState<FileCategory>('document');
   const [uploadDescription, setUploadDescription] = useState('');
+  const [sanitizeFilename, setSanitizeFilename] = useState(false);
 
   const filteredFiles = filter === 'all' ? files : files.filter((f) => f.category === filter);
 
@@ -110,6 +112,7 @@ export function ProjectFilesTab({ projectId, files, onRefresh, isLoading }: Proj
       await projectFilesApi.upload(projectId, uploadFiles, {
         category: uploadCategory,
         description: uploadDescription || undefined,
+        sanitizeFilename,
       });
       toast.success(`${uploadFiles.length} fichier(s) uploadé(s)`);
       setShowUploadDialog(false);
@@ -376,6 +379,17 @@ export function ProjectFilesTab({ projectId, files, onRefresh, isLoading }: Proj
                 onChange={(e) => setUploadDescription(e.target.value)}
                 placeholder="Description des fichiers..."
               />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="sanitize-upload"
+                checked={sanitizeFilename}
+                onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
+              />
+              <Label htmlFor="sanitize-upload" className="text-sm cursor-pointer">
+                Simplifier noms de fichiers
+              </Label>
             </div>
           </div>
 

@@ -19,7 +19,7 @@ export const projectFilesApi = {
   async upload(
     projectId: number,
     files: File[],
-    options?: { category?: FileCategory; description?: string }
+    options?: { category?: FileCategory; description?: string; sanitizeFilename?: boolean }
   ): Promise<UploadProjectFilesResponse> {
     const formData = new FormData();
     files.forEach((file) => {
@@ -31,7 +31,8 @@ export const projectFilesApi = {
     if (options?.description) {
       formData.append('description', options.description);
     }
-    return apiClient.upload(`/project-files/${projectId}/upload`, formData);
+    const queryParams = options?.sanitizeFilename === true ? '?sanitize_filename=true' : '';
+    return apiClient.upload(`/project-files/${projectId}/upload${queryParams}`, formData);
   },
 
   // URL de téléchargement
