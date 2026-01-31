@@ -79,7 +79,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
-  const [sanitizeFilename, setSanitizeFilename] = useState(true);
+  const [sanitizeFilename, setSanitizeFilename] = useState(false);
 
   // Annotation state
   const [showAnnotationDialog, setShowAnnotationDialog] = useState(false);

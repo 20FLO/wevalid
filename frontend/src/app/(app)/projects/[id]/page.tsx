@@ -46,7 +46,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   // PDF upload state
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   const [uploadStartPage, setUploadStartPage] = useState<string>('');
-  const [sanitizeFilename, setSanitizeFilename] = useState(true);
+  const [sanitizeFilename, setSanitizeFilename] = useState(false);
 
   // Page filtering/sorting state
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
