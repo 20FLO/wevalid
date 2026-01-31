@@ -28,6 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { PageThumbnail } from '@/components/projects/page-thumbnail';
 import { ProjectFilesTab } from '@/components/projects/project-files-tab';
@@ -55,10 +63,13 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
   // PDF upload state - use user preference as default
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
-  const [isUploadingWithLabels, setIsUploadingWithLabels] = useState(false);
   const [uploadStartPage, setUploadStartPage] = useState<string>('');
   const [sanitizeFilename, setSanitizeFilename] = useState(user?.sanitize_filenames ?? false);
-  const labelsInputRef = useRef<HTMLInputElement>(null);
+
+  // State for files that couldn't be auto-assigned
+  const [pendingFiles, setPendingFiles] = useState<Array<{ file: File; filename: string; reason: string }>>([]);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [selectedPageForAssign, setSelectedPageForAssign] = useState<string>('');
 
   // Update sanitizeFilename when user loads
   useEffect(() => {
@@ -202,40 +213,97 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     }
   };
 
-  // Handle upload with automatic page label detection
-  const handleUploadWithLabels = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Store original files for re-upload if needed
+  const pendingFilesMapRef = useRef<Map<string, File>>(new Map());
+
+  // Handle smart upload with automatic page label detection
+  const handleSmartUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setIsUploadingWithLabels(true);
+    const fileArray = Array.from(files);
+
+    // Store files for potential manual assignment
+    pendingFilesMapRef.current.clear();
+    fileArray.forEach(f => pendingFilesMapRef.current.set(f.name, f));
+
+    setIsUploadingPdf(true);
     try {
-      const result = await filesApi.uploadWithLabels(projectId, Array.from(files), {
+      const result = await filesApi.uploadWithLabels(projectId, fileArray, {
         sanitizeFilename,
       });
 
-      // Show detailed results
       const successCount = result.assignments.filter(a => a.status === 'success').length;
-      const skippedCount = result.assignments.filter(a => a.status === 'skipped').length;
+      const skippedAssignments = result.assignments.filter(a => a.status === 'skipped');
 
-      if (skippedCount > 0) {
-        const skippedFiles = result.assignments
-          .filter(a => a.status === 'skipped')
-          .map(a => a.filename)
-          .join(', ');
-        toast.warning(`${successCount} fichier(s) importé(s), ${skippedCount} ignoré(s): ${skippedFiles}`);
+      if (skippedAssignments.length > 0) {
+        // Store skipped files for manual assignment
+        const skippedFilesList = skippedAssignments.map(a => ({
+          file: pendingFilesMapRef.current.get(a.filename)!,
+          filename: a.filename,
+          reason: a.reason || 'Page non trouvée'
+        })).filter(f => f.file);
+
+        setPendingFiles(skippedFilesList);
+        setShowAssignDialog(true);
+
+        if (successCount > 0) {
+          toast.success(`${successCount} fichier(s) placé(s) automatiquement`);
+        }
       } else {
         toast.success(`${successCount} fichier(s) importé(s) aux bonnes positions`);
       }
 
-      // Refresh
+      // Refresh even if some are pending
       refreshPages();
       refreshProject();
       fetchDashboard();
-      if (labelsInputRef.current) labelsInputRef.current.value = '';
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'upload');
     } finally {
-      setIsUploadingWithLabels(false);
+      setIsUploadingPdf(false);
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+    }
+  };
+
+  // Handle manual assignment of a pending file
+  const handleManualAssign = async () => {
+    if (pendingFiles.length === 0 || !selectedPageForAssign) return;
+
+    const currentFile = pendingFiles[0];
+    const pageId = parseInt(selectedPageForAssign);
+
+    try {
+      await filesApi.upload(pageId, [currentFile.file], { sanitizeFilename });
+      toast.success(`${currentFile.filename} assigné à la page`);
+
+      // Remove from pending and continue
+      const remaining = pendingFiles.slice(1);
+      setPendingFiles(remaining);
+      setSelectedPageForAssign('');
+
+      if (remaining.length === 0) {
+        setShowAssignDialog(false);
+        refreshPages();
+        refreshProject();
+        fetchDashboard();
+      }
+    } catch (error) {
+      toast.error('Erreur lors de l\'assignation');
+    }
+  };
+
+  // Skip current pending file
+  const handleSkipFile = () => {
+    const remaining = pendingFiles.slice(1);
+    setPendingFiles(remaining);
+    setSelectedPageForAssign('');
+
+    if (remaining.length === 0) {
+      setShowAssignDialog(false);
+      refreshPages();
+      refreshProject();
+      fetchDashboard();
     }
   };
 
@@ -435,80 +503,37 @@ export default function ProjectPage({ params }: ProjectPageProps) {
           </TabsContent>
 
           <TabsContent value="pages" className="mt-4 space-y-4">
-            {/* Upload PDF complet */}
+            {/* Upload PDF */}
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
-                  <div className="flex-1 space-y-2">
-                    <Label htmlFor="pdf-upload" className="text-sm font-medium">
-                      Upload PDF complet
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Le PDF sera découpé page par page et assigné aux pages du projet
-                    </p>
-                  </div>
-                  <div className="flex items-end gap-3">
-                    <div className="w-24">
-                      <Label htmlFor="start-page" className="text-xs">Page départ</Label>
-                      <Input
-                        id="start-page"
-                        type="number"
-                        min="1"
-                        placeholder="1"
-                        value={uploadStartPage}
-                        onChange={(e) => setUploadStartPage(e.target.value)}
-                        className="h-9"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 pb-1">
-                      <Checkbox
-                        id="sanitize-filename"
-                        checked={sanitizeFilename}
-                        onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
-                      />
-                      <Label htmlFor="sanitize-filename" className="text-xs cursor-pointer">
-                        Simplifier noms
+                <div className="space-y-4">
+                  {/* Import intelligent (détection automatique) */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+                    <div className="flex-1 space-y-2">
+                      <Label htmlFor="pdf-upload" className="text-sm font-medium">
+                        Importer des PDFs
                       </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Les fichiers sont automatiquement placés selon leurs Page Labels ou le numéro dans le nom. Si la page cible n&apos;est pas trouvée, vous pourrez choisir où les placer.
+                      </p>
                     </div>
-                    <Button
-                      variant="outline"
-                      disabled={isUploadingPdf}
-                      onClick={() => pdfInputRef.current?.click()}
-                    >
-                      {isUploadingPdf ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Découpage...
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="mr-2 h-4 w-4" />
-                          Sélectionner PDF
-                        </>
-                      )}
-                    </Button>
-                    <input
-                      ref={pdfInputRef}
-                      type="file"
-                      accept=".pdf"
-                      className="hidden"
-                      onChange={handlePdfUpload}
-                    />
-                  </div>
-
-                  {/* Upload avec Page Labels */}
-                  <div className="border-t pt-4 mt-4">
-                    <p className="text-sm font-medium mb-2">Upload avec détection automatique (Page Labels)</p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Uploadez des PDFs individuels - ils seront automatiquement placés à la bonne position selon leurs Page Labels ou le numéro dans le nom de fichier.
-                    </p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-end gap-3">
+                      <div className="flex items-center gap-2 pb-1">
+                        <Checkbox
+                          id="sanitize-filename"
+                          checked={sanitizeFilename}
+                          onCheckedChange={(checked) => setSanitizeFilename(checked === true)}
+                        />
+                        <Label htmlFor="sanitize-filename" className="text-xs cursor-pointer">
+                          Simplifier noms
+                        </Label>
+                      </div>
                       <Button
-                        variant="secondary"
-                        disabled={isUploadingWithLabels}
-                        onClick={() => labelsInputRef.current?.click()}
+                        variant="default"
+                        disabled={isUploadingPdf}
+                        onClick={() => pdfInputRef.current?.click()}
                       >
-                        {isUploadingWithLabels ? (
+                        {isUploadingPdf ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Import...
@@ -516,23 +541,111 @@ export default function ProjectPage({ params }: ProjectPageProps) {
                         ) : (
                           <>
                             <Upload className="mr-2 h-4 w-4" />
-                            Import avec Page Labels
+                            Importer PDF(s)
                           </>
                         )}
                       </Button>
                       <input
-                        ref={labelsInputRef}
+                        ref={pdfInputRef}
                         type="file"
                         accept=".pdf"
                         multiple
                         className="hidden"
-                        onChange={handleUploadWithLabels}
+                        onChange={handleSmartUpload}
                       />
+                    </div>
+                  </div>
+
+                  {/* Option alternative : PDF complet */}
+                  <div className="border-t pt-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+                      <div className="flex-1 space-y-2">
+                        <p className="text-sm font-medium">Upload PDF complet (découpage)</p>
+                        <p className="text-xs text-muted-foreground">
+                          Découpez un PDF multi-pages et assignez-le séquentiellement à partir d&apos;une page de départ
+                        </p>
+                      </div>
+                      <div className="flex items-end gap-3">
+                        <div className="w-24">
+                          <Label htmlFor="start-page" className="text-xs">Page départ</Label>
+                          <Input
+                            id="start-page"
+                            type="number"
+                            min="1"
+                            placeholder="1"
+                            value={uploadStartPage}
+                            onChange={(e) => setUploadStartPage(e.target.value)}
+                            className="h-9"
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          disabled={isUploadingPdf}
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = '.pdf';
+                            input.onchange = (e) => handlePdfUpload(e as unknown as React.ChangeEvent<HTMLInputElement>);
+                            input.click();
+                          }}
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          Découper PDF
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
+            {/* Dialog for manual page assignment */}
+            <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Assignation manuelle</DialogTitle>
+                  <DialogDescription>
+                    Le fichier suivant n&apos;a pas pu être placé automatiquement. Veuillez sélectionner la page cible.
+                  </DialogDescription>
+                </DialogHeader>
+                {pendingFiles.length > 0 && (
+                  <div className="space-y-4 py-4">
+                    <div className="rounded-lg border p-3 bg-muted/50">
+                      <p className="font-medium text-sm">{pendingFiles[0].filename}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{pendingFiles[0].reason}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="page-select">Sélectionner la page cible</Label>
+                      <Select value={selectedPageForAssign} onValueChange={setSelectedPageForAssign}>
+                        <SelectTrigger id="page-select">
+                          <SelectValue placeholder="Choisir une page..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {pages.map((page) => (
+                            <SelectItem key={page.id} value={String(page.id)}>
+                              Page {page.page_number}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {pendingFiles.length > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        {pendingFiles.length - 1} autre(s) fichier(s) en attente
+                      </p>
+                    )}
+                  </div>
+                )}
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="ghost" onClick={handleSkipFile}>
+                    Ignorer ce fichier
+                  </Button>
+                  <Button onClick={handleManualAssign} disabled={!selectedPageForAssign}>
+                    Assigner à cette page
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Filters */}
             {pages.length > 0 && (
