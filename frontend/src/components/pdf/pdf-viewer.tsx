@@ -94,6 +94,10 @@ export function PDFViewer({
 
   // Fetch PDF with authentication token
   useEffect(() => {
+    // Reset state when URL changes to avoid "Buffer already detached" error
+    setPdfData(null);
+    setIsLoading(true);
+
     const fetchPDF = async () => {
       setIsFetching(true);
       setError(null);
@@ -108,7 +112,9 @@ export function PDFViewer({
         }
 
         const arrayBuffer = await response.arrayBuffer();
-        setPdfData(arrayBuffer);
+        // Create a copy of the ArrayBuffer to prevent "Buffer already detached" errors
+        const copy = arrayBuffer.slice(0);
+        setPdfData(copy);
       } catch (err) {
         console.error('PDF fetch error:', err);
         setError('Impossible de charger le PDF');
