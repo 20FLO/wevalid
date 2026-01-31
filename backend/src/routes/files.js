@@ -9,6 +9,7 @@ const fs = require('fs').promises;
 const sharp = require('sharp');
 const { extractAnnotationsFromPDF } = require('../utils/pdfAnnotations');
 const { embedAnnotationsInPDF } = require('../utils/pdfAnnotationEmbed');
+const { extractPageLabels, parsePageLabel, createPageMapping } = require('../utils/pdfPageLabels');
 
 // ============================================
 // ENDPOINT PUBLIC - Miniatures (pas d'auth)
@@ -169,7 +170,8 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
 router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.single('file'), async (req, res) => {
   const project_id = req.body.project_id || req.query.project_id;
   const extract_annotations = req.body.extract_annotations !== 'false';
-  const start_page = parseInt(req.body.start_page) || 1; // Page de départ (folio)
+  const start_page = parseInt(req.body.start_page) || null; // Page de départ (folio) - null = auto-detect via Page Labels
+  const use_page_labels = req.body.use_page_labels !== 'false'; // Utiliser les Page Labels par défaut
 
   if (!project_id) {
     return res.status(400).json({ error: { message: 'project_id requis' } });
@@ -196,12 +198,53 @@ router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur
     const project = projectCheck.rows[0];
     const pdfPageCount = await countPDFPages(req.file.path);
 
-    logger.info('PDF complet uploadé:', { 
-      filename: req.file.originalname, 
+    logger.info('PDF complet uploadé:', {
+      filename: req.file.originalname,
       pagesInPDF: pdfPageCount,
-      pagesInProject: project.total_pages 
+      pagesInProject: project.total_pages
     });
 
+    // 1. Sauvegarder le PDF global dans project_files
+    const globalPdfResult = await client.query(
+      `INSERT INTO project_files (project_id, filename, original_filename, file_path, file_type, file_size, category, description, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        project_id,
+        req.file.filename,
+        req.file.originalname,
+        req.file.path,
+        req.file.mimetype,
+        req.file.size,
+        'document',
+        `PDF source - ${pdfPageCount} pages`,
+        req.user.id
+      ]
+    );
+    const globalPdfFile = globalPdfResult.rows[0];
+
+    logger.info('PDF global sauvegardé dans project_files:', {
+      projectFileId: globalPdfFile.id,
+      filename: req.file.originalname
+    });
+
+    // 2. Extraire les Page Labels si demandé
+    let pageLabels = [];
+    let mappingMode = 'sequential';
+
+    if (use_page_labels) {
+      try {
+        pageLabels = await extractPageLabels(req.file.path);
+        if (pageLabels.length > 0) {
+          mappingMode = 'page_labels';
+          logger.info('Page Labels extraits:', { count: pageLabels.length, labels: pageLabels.slice(0, 5) });
+        }
+      } catch (labelError) {
+        logger.warn('Impossible d\'extraire les Page Labels:', labelError.message);
+      }
+    }
+
+    // 3. Découper et assigner les pages
     const uploadedFiles = await splitAndAssignPDF(
       req.file.path,
       project_id,
@@ -209,23 +252,29 @@ router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur
       req.user.id,
       client,
       extract_annotations,
-      start_page
+      start_page || 1, // Fallback to 1 if not specified
+      pageLabels,
+      globalPdfFile.id // Passer l'ID du PDF global pour la liaison
     );
 
     await client.query('COMMIT');
 
-    logger.info('PDF découpé et assigné:', { 
-      projectId: project_id, 
-      filesCreated: uploadedFiles.length 
+    logger.info('PDF découpé et assigné:', {
+      projectId: project_id,
+      filesCreated: uploadedFiles.length,
+      mappingMode
     });
 
     res.status(201).json({
       message: `PDF découpé avec succès en ${uploadedFiles.length} pages`,
+      global_pdf: globalPdfFile,
       files: uploadedFiles,
       stats: {
         pdf_pages: pdfPageCount,
         project_pages: project.total_pages,
-        files_created: uploadedFiles.length
+        files_created: uploadedFiles.length,
+        mapping_mode: mappingMode,
+        page_labels_found: pageLabels.length
       }
     });
   } catch (error) {
@@ -482,103 +531,192 @@ async function countPDFPages(pdfPath) {
   }
 }
 
-async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client, extractAnnotations = true, startPage = 1) {
+async function splitAndAssignPDF(pdfPath, projectId, pdfPageCount, userId, client, extractAnnotations = true, startPage = 1, pageLabels = [], globalPdfId = null) {
   try {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execPromise = promisify(exec);
 
-    // Get project pages starting from the specified page number
+    // Get all project pages
     const pagesResult = await client.query(
-      'SELECT id, page_number FROM pages WHERE project_id = $1 AND page_number >= $2 ORDER BY page_number',
-      [projectId, startPage]
+      'SELECT id, page_number FROM pages WHERE project_id = $1 ORDER BY page_number',
+      [projectId]
     );
 
     const projectPages = pagesResult.rows;
     const uploadedFiles = [];
-    const maxPages = Math.min(pdfPageCount, projectPages.length);
 
-    logger.info(`Découpage en cours: ${maxPages} pages à traiter (départ page ${startPage})...`);
+    // Créer un index des pages projet par numéro
+    const projectPagesByNumber = {};
+    for (const page of projectPages) {
+      projectPagesByNumber[page.page_number] = page;
+    }
 
-    for (let i = 0; i < maxPages; i++) {
-      const pdfPageNum = i + 1; // Page number in the PDF (1-indexed)
-      const projectPage = projectPages[i]; // Corresponding project page
+    // Déterminer le mapping PDF -> pages projet
+    let pageMapping = [];
 
+    if (pageLabels.length > 0) {
+      // Utiliser les Page Labels pour le mapping
+      logger.info('Utilisation des Page Labels pour le mapping...');
+
+      for (let pdfPageNum = 1; pdfPageNum <= pdfPageCount; pdfPageNum++) {
+        const labelInfo = pageLabels.find(l => l.pdfPage === pdfPageNum);
+        let targetPageNumber = null;
+
+        if (labelInfo && labelInfo.label) {
+          // Essayer de parser le label pour obtenir un numéro de page
+          targetPageNumber = parsePageLabel(labelInfo.label);
+        }
+
+        // Si pas de label ou label non parsable, utiliser le mapping séquentiel
+        if (!targetPageNumber) {
+          targetPageNumber = startPage + pdfPageNum - 1;
+        }
+
+        if (projectPagesByNumber[targetPageNumber]) {
+          pageMapping.push({
+            pdfPage: pdfPageNum,
+            projectPage: projectPagesByNumber[targetPageNumber],
+            label: labelInfo?.label || String(targetPageNumber)
+          });
+        }
+      }
+    } else {
+      // Mapping séquentiel classique
+      logger.info(`Mapping séquentiel à partir de la page ${startPage}...`);
+
+      for (let i = 0; i < pdfPageCount; i++) {
+        const pdfPageNum = i + 1;
+        const targetPageNumber = startPage + i;
+
+        if (projectPagesByNumber[targetPageNumber]) {
+          pageMapping.push({
+            pdfPage: pdfPageNum,
+            projectPage: projectPagesByNumber[targetPageNumber],
+            label: String(targetPageNumber)
+          });
+        }
+      }
+    }
+
+    logger.info(`Découpage en cours: ${pageMapping.length} pages à traiter...`);
+
+    for (let i = 0; i < pageMapping.length; i++) {
+      const { pdfPage, projectPage, label } = pageMapping[i];
+
+      // Marquer les anciens fichiers comme non-courants
       await client.query(
         'UPDATE files SET is_current = false WHERE page_id = $1 AND is_current = true',
         [projectPage.id]
       );
 
+      // Obtenir le prochain numéro de version
       const versionResult = await client.query(
         'SELECT COALESCE(MAX(version), 0) + 1 as next_version FROM files WHERE page_id = $1',
         [projectPage.id]
       );
       const nextVersion = versionResult.rows[0].next_version;
 
+      // Générer le nom du fichier de sortie
       const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(7);
       const outputFilename = `${timestamp}-${randomString}-page${projectPage.page_number}.pdf`;
       const outputPath = path.join('/app/storage/uploads', outputFilename);
 
-      // Extract the pdfPageNum-th page from the PDF
+      // Extraire la page du PDF
       await execPromise(
-        `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dFirstPage=${pdfPageNum} -dLastPage=${pdfPageNum} -sOutputFile=${outputPath} ${pdfPath}`
+        `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dFirstPage=${pdfPage} -dLastPage=${pdfPage} -sOutputFile="${outputPath}" "${pdfPath}"`
       );
 
+      // Générer la miniature
       const thumbnailPath = await generatePDFThumbnail(outputPath);
       const stats = await fs.stat(outputPath);
 
       // Extraire les annotations de la page si demandé
       if (extractAnnotations) {
-        const extractedAnnotations = await extractAnnotationsFromPDF(outputPath);
-        for (const annot of extractedAnnotations) {
-          if (annot.content && annot.content.trim()) {
-            await client.query(
-              `INSERT INTO annotations (page_id, type, content, position, color, created_by)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [
-                projectPage.id,
-                annot.type,
-                annot.content,
-                JSON.stringify(annot.position),
-                annot.color,
-                userId
-              ]
-            );
+        try {
+          const extractedAnnotations = await extractAnnotationsFromPDF(outputPath);
+          for (const annot of extractedAnnotations) {
+            if (annot.content && annot.content.trim()) {
+              await client.query(
+                `INSERT INTO annotations (page_id, type, content, position, color, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                  projectPage.id,
+                  annot.type,
+                  annot.content,
+                  JSON.stringify(annot.position),
+                  annot.color,
+                  userId
+                ]
+              );
+            }
           }
+        } catch (annotError) {
+          logger.warn(`Erreur extraction annotations page ${pdfPage}:`, annotError.message);
         }
       }
 
-      const result = await client.query(
-        `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING *`,
-        [
-          projectPage.id,
-          outputFilename,
-          `page_${projectPage.page_number}.pdf`,
-          outputPath,
-          thumbnailPath,
-          'application/pdf',
-          stats.size,
-          userId,
-          true,
-          nextVersion
-        ]
-      );
+      // Insérer le fichier dans la base
+      // Try with source tracking columns first, fallback if they don't exist
+      let result;
+      try {
+        result = await client.query(
+          `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version, source_project_file_id, source_pdf_page)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING *`,
+          [
+            projectPage.id,
+            outputFilename,
+            `page_${projectPage.page_number}.pdf`,
+            outputPath,
+            thumbnailPath,
+            'application/pdf',
+            stats.size,
+            userId,
+            true,
+            nextVersion,
+            globalPdfId, // Lien vers le PDF source
+            pdfPage // Numéro de page dans le PDF source
+          ]
+        );
+      } catch (insertError) {
+        // Fallback: columns might not exist yet
+        if (insertError.message.includes('source_project_file_id') || insertError.message.includes('source_pdf_page')) {
+          logger.warn('Source tracking columns not found, inserting without them');
+          result = await client.query(
+            `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING *`,
+            [
+              projectPage.id,
+              outputFilename,
+              `page_${projectPage.page_number}.pdf`,
+              outputPath,
+              thumbnailPath,
+              'application/pdf',
+              stats.size,
+              userId,
+              true,
+              nextVersion
+            ]
+          );
+        } else {
+          throw insertError;
+        }
+      }
 
-      uploadedFiles.push(result.rows[0]);
+      uploadedFiles.push({
+        ...result.rows[0],
+        mapped_from_label: label
+      });
 
       if ((i + 1) % 10 === 0) {
-        logger.info(`Progression découpage: ${i + 1}/${maxPages} pages`);
+        logger.info(`Progression découpage: ${i + 1}/${pageMapping.length} pages`);
       }
     }
 
-    try {
-      await fs.unlink(pdfPath);
-    } catch (error) {
-      logger.warn('Impossible de supprimer le PDF original:', error);
-    }
+    // Note: On ne supprime plus le PDF original car il est maintenant sauvegardé dans project_files
 
     return uploadedFiles;
   } catch (error) {
