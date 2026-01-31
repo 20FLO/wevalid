@@ -50,6 +50,9 @@ import {
   Highlighter,
   Lock,
   ShieldAlert,
+  GitCompareArrows,
+  X,
+  Layers,
 } from 'lucide-react';
 import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus } from '@/types';
 import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS, LOCKED_STATUSES } from '@/types';
@@ -79,7 +82,12 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
-  const [sanitizeFilename, setSanitizeFilename] = useState(false);
+  const [sanitizeFilename, setSanitizeFilename] = useState(user?.sanitize_filenames ?? false);
+
+  // Update sanitizeFilename when user loads
+  useEffect(() => {
+    setSanitizeFilename(user?.sanitize_filenames ?? false);
+  }, [user?.sanitize_filenames]);
 
   // Annotation state
   const [showAnnotationDialog, setShowAnnotationDialog] = useState(false);
@@ -104,21 +112,33 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   // Annotation highlighting state (for syncing PDF markers with list)
   const [highlightedAnnotationId, setHighlightedAnnotationId] = useState<number | null>(null);
 
+  // Version history state
+  const [fileVersions, setFileVersions] = useState<FileItem[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<FileItem | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareVersion, setCompareVersion] = useState<FileItem | null>(null);
+
   // Fetch page data
   const fetchPageData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [pageRes, annotationsRes, historyRes, pagesRes] = await Promise.all([
+      const [pageRes, annotationsRes, historyRes, pagesRes, versionsRes] = await Promise.all([
         projectsApi.getPage(pageIdNum),
         annotationsApi.getByPage(pageIdNum),
         projectsApi.getPageHistory(pageIdNum),
         projectsApi.getPages(projectId),
+        filesApi.getVersionHistory(pageIdNum),
       ]);
 
       setPage(pageRes.page);
       setAnnotations(annotationsRes.annotations);
       setHistory(historyRes.history);
       setAllPages(pagesRes.pages);
+      setFileVersions(versionsRes.versions || []);
+
+      // Set current version (latest) as selected
+      const currentVersion = versionsRes.versions?.find((v: FileItem) => v.is_current) || versionsRes.versions?.[0];
+      setSelectedVersion(currentVersion || null);
 
       // Find current page index
       const idx = pagesRes.pages.findIndex((p) => p.id === pageIdNum);
@@ -285,21 +305,23 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     );
   }
 
-  // Use latest_file_id to find the correct file, fallback to first file
-  const currentFile = page.latest_file_id
+  // Use selectedVersion if available, otherwise latest_file_id
+  const currentFile = selectedVersion || (page.latest_file_id
     ? page.files?.find(f => f.id === page.latest_file_id) || page.files?.[0]
-    : page.files?.[0];
+    : page.files?.[0]);
 
-  const thumbnailUrl = page.latest_file_id
-    ? filesApi.getThumbnailUrl(page.latest_file_id)
-    : currentFile
+  const thumbnailUrl = currentFile
     ? filesApi.getThumbnailUrl(currentFile.id)
     : null;
 
-  // Check if current file is a PDF - use latest_file_id if available
-  const fileIdForPdf = page.latest_file_id || currentFile?.id;
+  // Check if current file is a PDF
+  const fileIdForPdf = currentFile?.id;
   const isPDF = currentFile?.file_type === 'application/pdf' || currentFile?.original_filename?.endsWith('.pdf');
   const pdfUrl = fileIdForPdf ? filesApi.getDownloadUrl(fileIdForPdf) : null;
+
+  // For comparison mode
+  const comparePdfUrl = compareVersion?.id ? filesApi.getDownloadUrl(compareVersion.id) : null;
+  const hasMultipleVersions = fileVersions.length > 1;
 
   // Check if page is locked (BAT validé or sent to printer)
   const isLocked = LOCKED_STATUSES.includes(page.status);
@@ -356,6 +378,130 @@ export default function PageDetailPage({ params }: PageDetailProps) {
           <div className="flex-1 grid gap-6 lg:grid-cols-3">
             {/* Main viewer */}
             <div className="lg:col-span-2 space-y-4">
+
+            {/* Version controls */}
+            {hasMultipleVersions && (
+              <Card className="bg-muted/50">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Version</span>
+                      <Select
+                        value={selectedVersion?.id?.toString() || ''}
+                        onValueChange={(value) => {
+                          const version = fileVersions.find(v => v.id === parseInt(value));
+                          setSelectedVersion(version || null);
+                        }}
+                      >
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Sélectionner une version" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fileVersions.map((v) => (
+                            <SelectItem key={v.id} value={v.id.toString()}>
+                              v{v.version} - {new Date(v.uploaded_at).toLocaleDateString('fr-FR')}
+                              {v.is_current && ' (actuelle)'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {!compareMode ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCompareMode(true);
+                          // Default to previous version for comparison
+                          const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
+                          const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];
+                          setCompareVersion(prevVersion);
+                        }}
+                      >
+                        <GitCompareArrows className="mr-2 h-4 w-4" />
+                        Comparer
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">vs</span>
+                        <Select
+                          value={compareVersion?.id?.toString() || ''}
+                          onValueChange={(value) => {
+                            const version = fileVersions.find(v => v.id === parseInt(value));
+                            setCompareVersion(version || null);
+                          }}
+                        >
+                          <SelectTrigger className="w-[200px]">
+                            <SelectValue placeholder="Version à comparer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fileVersions.filter(v => v.id !== selectedVersion?.id).map((v) => (
+                              <SelectItem key={v.id} value={v.id.toString()}>
+                                v{v.version} - {new Date(v.uploaded_at).toLocaleDateString('fr-FR')}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setCompareMode(false);
+                            setCompareVersion(null);
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Comparison view - side by side */}
+            {compareMode && comparePdfUrl && isPDF ? (
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="py-2 px-4">
+                    <CardTitle className="text-sm">
+                      v{selectedVersion?.version} - {selectedVersion?.uploaded_by_name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0 overflow-hidden">
+                    <PDFViewer
+                      url={pdfUrl!}
+                      annotations={annotations.filter(a =>
+                        !a.created_in_file_id || a.created_in_file_id <= (selectedVersion?.id || 0)
+                      )}
+                      highlightedAnnotationId={highlightedAnnotationId}
+                      readOnly={true}
+                      className="min-h-[500px]"
+                    />
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="py-2 px-4">
+                    <CardTitle className="text-sm">
+                      v{compareVersion?.version} - {compareVersion?.uploaded_by_name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0 overflow-hidden">
+                    <PDFViewer
+                      url={comparePdfUrl}
+                      annotations={annotations.filter(a =>
+                        !a.created_in_file_id || a.created_in_file_id <= (compareVersion?.id || 0)
+                      )}
+                      highlightedAnnotationId={highlightedAnnotationId}
+                      readOnly={true}
+                      className="min-h-[500px]"
+                    />
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
             <Card>
               <CardContent className="p-0 overflow-hidden">
                 {/* PDF Viewer or Image viewer */}
@@ -432,23 +578,32 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       )}
 
                       {/* Annotation markers */}
-                      {annotations.map((annotation) => {
+                      {annotations.map((annotation, index) => {
                         const pos = typeof annotation.position === 'string'
                           ? JSON.parse(annotation.position)
                           : annotation.position;
                         if (!pos) return null;
 
-                        // Calculate global index for comment annotations (non-highlight)
-                        const commentAnnotations = annotations.filter(a => a.type !== 'highlight');
-                        const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
+                        // Global index: number ALL annotations in order (1, 2, 3...)
+                        const globalIndex = index + 1;
                         const isHighlighted = highlightedAnnotationId === annotation.id;
+
+                        // Determine color based on type
+                        const getBgColor = () => {
+                          if (annotation.resolved) return 'bg-green-500';
+                          switch (annotation.type) {
+                            case 'highlight': return 'bg-yellow-500';
+                            case 'ink': return 'bg-purple-500';
+                            default: return 'bg-red-500';
+                          }
+                        };
 
                         return (
                           <div
                             key={annotation.id}
                             className={cn(
-                              'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer transition-all shadow-lg border-2 border-white z-50',
-                              annotation.resolved ? 'bg-green-500 text-white' : 'bg-red-500 text-white',
+                              'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer transition-all shadow-lg border-2 border-white z-50 text-white',
+                              getBgColor(),
                               isHighlighted ? 'scale-150 ring-4 ring-blue-500 animate-bounce' : 'hover:scale-125'
                             )}
                             style={{
@@ -482,6 +637,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                 )}
               </CardContent>
             </Card>
+            )}
 
             {/* Navigation between project pages */}
             <Card className="bg-muted/50">
@@ -737,11 +893,30 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                     Aucune annotation
                   </p>
                 ) : (
-                  annotations.map((annotation) => {
-                    // Calculate global index for comment annotations (non-highlight)
-                    const commentAnnotations = annotations.filter(a => a.type !== 'highlight');
-                    const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
+                  annotations.map((annotation, index) => {
+                    // Global index: number ALL annotations in order (1, 2, 3...)
+                    const globalIndex = index + 1;
                     const isHighlighted = highlightedAnnotationId === annotation.id;
+
+                    // Determine badge color based on type
+                    const getBadgeClass = () => {
+                      if (annotation.resolved) return 'bg-green-500 text-white';
+                      switch (annotation.type) {
+                        case 'highlight': return 'bg-yellow-500 text-white';
+                        case 'ink': return 'bg-purple-500 text-white';
+                        default: return 'bg-red-500 text-white';
+                      }
+                    };
+
+                    // Type label
+                    const getTypeLabel = () => {
+                      switch (annotation.type) {
+                        case 'highlight': return 'Surlignage';
+                        case 'ink': return 'Dessin';
+                        case 'comment': return 'Commentaire';
+                        default: return annotation.type;
+                      }
+                    };
 
                     return (
                     <Card
@@ -761,12 +936,11 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       <CardContent className="p-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
-                            <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                              annotation.type === 'highlight'
-                                ? 'bg-yellow-400 text-yellow-900'
-                                : 'bg-red-500 text-white'
-                            }`}>
-                              {annotation.type === 'highlight' ? <Highlighter className="h-3 w-3" /> : globalIndex}
+                            <span className={cn(
+                              'flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold',
+                              getBadgeClass()
+                            )}>
+                              {annotation.resolved ? '✓' : globalIndex}
                             </span>
                             <div>
                               <p className="text-sm font-medium">
@@ -805,15 +979,23 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                           </div>
                         </div>
                         <p className="mt-2 text-sm">{annotation.content}</p>
-                        <div className="flex gap-2 mt-2">
-                          {annotation.type === 'highlight' && (
-                            <Badge variant="outline" className="text-xs bg-yellow-100">
-                              Surlignage
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <Badge variant="outline" className={cn(
+                            'text-xs',
+                            annotation.type === 'highlight' && 'bg-yellow-100',
+                            annotation.type === 'ink' && 'bg-purple-100'
+                          )}>
+                            {getTypeLabel()}
+                          </Badge>
+                          {annotation.created_in_version && (
+                            <Badge variant="secondary" className="text-xs">
+                              v{annotation.created_in_version}
                             </Badge>
                           )}
                           {annotation.resolved && (
                             <Badge variant="outline" className="text-xs text-green-600">
                               Résolu
+                              {annotation.resolved_in_version_number && ` (v${annotation.resolved_in_version_number})`}
                             </Badge>
                           )}
                         </div>

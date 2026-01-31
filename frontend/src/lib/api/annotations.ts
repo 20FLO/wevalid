@@ -1,7 +1,9 @@
 // Services pour les annotations
 
 import apiClient from './client';
-import type { Annotation, AnnotationType, AnnotationPosition } from '@/types';
+import type { Annotation, AnnotationType, AnnotationPosition, AnnotationReply } from '@/types';
+
+export type AnnotationStatus = 'open' | 'resolved' | 'rejected';
 
 export interface CreateAnnotationData {
   page_id: number;
@@ -9,6 +11,7 @@ export interface CreateAnnotationData {
   content: string;
   position?: AnnotationPosition;
   color?: string;
+  file_id?: number;
 }
 
 export interface UpdateAnnotationData {
@@ -18,9 +21,16 @@ export interface UpdateAnnotationData {
   resolved?: boolean;
 }
 
+export interface UpdateStatusData {
+  status: AnnotationStatus;
+  status_reason?: string;
+  resolved_in_version?: number;
+}
+
 export const annotationsApi = {
-  async getByPage(pageId: number): Promise<{ annotations: Annotation[] }> {
-    return apiClient.get(`/annotations/page/${pageId}`);
+  async getByPage(pageId: number, fileId?: number): Promise<{ annotations: Annotation[] }> {
+    const params = fileId ? `?file_id=${fileId}` : '';
+    return apiClient.get(`/annotations/page/${pageId}${params}`);
   },
 
   async create(data: CreateAnnotationData): Promise<{ message: string; annotation: Annotation }> {
@@ -37,6 +47,24 @@ export const annotationsApi = {
 
   async resolve(id: number): Promise<{ message: string; annotation: Annotation }> {
     return apiClient.put(`/annotations/${id}`, { resolved: true });
+  },
+
+  // Status management (open, resolved, rejected)
+  async updateStatus(id: number, data: UpdateStatusData): Promise<{ message: string; annotation: Annotation }> {
+    return apiClient.put(`/annotations/${id}/status`, data);
+  },
+
+  // Replies (threaded discussions)
+  async getReplies(annotationId: number): Promise<{ replies: AnnotationReply[] }> {
+    return apiClient.get(`/annotations/${annotationId}/replies`);
+  },
+
+  async addReply(annotationId: number, content: string): Promise<{ message: string; reply: AnnotationReply }> {
+    return apiClient.post(`/annotations/${annotationId}/replies`, { content });
+  },
+
+  async deleteReply(annotationId: number, replyId: number): Promise<{ message: string }> {
+    return apiClient.delete(`/annotations/${annotationId}/replies/${replyId}`);
   },
 
   // XFDF Import/Export for Acrobat compatibility

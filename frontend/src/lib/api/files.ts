@@ -73,4 +73,71 @@ export const filesApi = {
   getAnnotatedDownloadUrl(fileId: number): string {
     return `${API_BASE_URL}/files/download-annotated/${fileId}`;
   },
+
+  /**
+   * Get all versions of a page's files
+   */
+  async getVersionHistory(pageId: number): Promise<{
+    page_id: string;
+    versions: FileItem[];
+  }> {
+    return apiClient.get(`/files/page/${pageId}/history`);
+  },
+
+  /**
+   * Get URL to download multiple pages as a single PDF
+   */
+  getMultiPageDownloadUrl(): string {
+    return `${API_BASE_URL}/files/download-multi`;
+  },
+
+  /**
+   * Download multiple pages as a single PDF
+   */
+  async downloadMultiPage(pageIds: number[], includeAnnotations: boolean = true): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/files/download-multi`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+      },
+      body: JSON.stringify({
+        page_ids: pageIds,
+        include_annotations: includeAnnotations,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Erreur lors du téléchargement');
+    }
+
+    return response.blob();
+  },
+
+  /**
+   * Get URL to download entire project as PDF
+   */
+  getProjectDownloadUrl(projectId: number, includeAnnotations: boolean = true): string {
+    return `${API_BASE_URL}/files/download-project/${projectId}?annotations=${includeAnnotations}`;
+  },
+
+  /**
+   * Download entire project as a single PDF
+   */
+  async downloadProject(projectId: number, includeAnnotations: boolean = true): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/files/download-project/${projectId}?annotations=${includeAnnotations}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Erreur lors du téléchargement');
+    }
+
+    return response.blob();
+  },
 };

@@ -55,6 +55,7 @@ interface ProjectFilesTabProps {
   files: ProjectFile[];
   onRefresh: () => void;
   isLoading?: boolean;
+  defaultSanitizeFilename?: boolean;
 }
 
 const CATEGORY_LABELS: Record<FileCategory, string> = {
@@ -87,7 +88,7 @@ function formatDate(dateStr: string): string {
   });
 }
 
-export function ProjectFilesTab({ projectId, files, onRefresh, isLoading }: ProjectFilesTabProps) {
+export function ProjectFilesTab({ projectId, files, onRefresh, isLoading, defaultSanitizeFilename = false }: ProjectFilesTabProps) {
   const [filter, setFilter] = useState<FileCategory | 'all'>('all');
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showVersionsDialog, setShowVersionsDialog] = useState(false);
@@ -100,7 +101,7 @@ export function ProjectFilesTab({ projectId, files, onRefresh, isLoading }: Proj
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadCategory, setUploadCategory] = useState<FileCategory>('document');
   const [uploadDescription, setUploadDescription] = useState('');
-  const [sanitizeFilename, setSanitizeFilename] = useState(false);
+  const [sanitizeFilename, setSanitizeFilename] = useState(defaultSanitizeFilename);
 
   const filteredFiles = filter === 'all' ? files : files.filter((f) => f.category === filter);
 

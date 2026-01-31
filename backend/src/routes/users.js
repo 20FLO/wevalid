@@ -14,7 +14,7 @@ router.use(authenticateToken);
 router.get('/me', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, email, first_name, last_name, role, is_active, created_at, last_login FROM users WHERE id = $1',
+      'SELECT id, email, first_name, last_name, role, is_active, created_at, last_login, COALESCE(sanitize_filenames, false) as sanitize_filenames FROM users WHERE id = $1',
       [req.user.id]
     );
     if (result.rows.length === 0) {
@@ -28,7 +28,7 @@ router.get('/me', async (req, res) => {
 });
 
 router.put('/me', async (req, res) => {
-  const { first_name, last_name, email } = req.body;
+  const { first_name, last_name, email, sanitize_filenames } = req.body;
   try {
     const updates = {};
     if (first_name) updates.first_name = first_name;
@@ -43,6 +43,9 @@ router.put('/me', async (req, res) => {
       }
       updates.email = email;
     }
+    if (typeof sanitize_filenames === 'boolean') {
+      updates.sanitize_filenames = sanitize_filenames;
+    }
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: { message: 'Aucune donnée à mettre à jour' } });
     }
@@ -51,7 +54,7 @@ router.put('/me', async (req, res) => {
     const setClause = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
     const result = await pool.query(
       `UPDATE users SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1}
-       RETURNING id, email, first_name, last_name, role, is_active`,
+       RETURNING id, email, first_name, last_name, role, is_active, COALESCE(sanitize_filenames, false) as sanitize_filenames`,
       [...values, req.user.id]
     );
     logger.info('Profil mis à jour:', { userId: req.user.id });

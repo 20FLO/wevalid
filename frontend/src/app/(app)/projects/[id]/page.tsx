@@ -4,6 +4,7 @@ import { use, useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useProject, useProjectPages } from '@/hooks/use-projects';
+import { useAuth } from '@/hooks/use-auth';
 import { projectsApi } from '@/lib/api/projects';
 import { projectFilesApi } from '@/lib/api/project-files';
 import { filesApi } from '@/lib/api/files';
@@ -18,7 +19,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PageStatus, ProjectFile, ProjectDashboard as DashboardData } from '@/types';
-import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen, Upload, Loader2 } from 'lucide-react';
+import { ArrowLeft, Users, FileText, Settings, Building2, LayoutDashboard, FolderOpen, Upload, Loader2, Save, Download } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from 'sonner';
 import { PageThumbnail } from '@/components/projects/page-thumbnail';
 import { ProjectFilesTab } from '@/components/projects/project-files-tab';
@@ -39,14 +48,20 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   const projectId = parseInt(id);
   const router = useRouter();
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
 
   const { project, isLoading: projectLoading, refetch: refreshProject } = useProject(projectId);
   const { pages, isLoading: pagesLoading, refetch: refreshPages } = useProjectPages(projectId);
 
-  // PDF upload state
+  // PDF upload state - use user preference as default
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   const [uploadStartPage, setUploadStartPage] = useState<string>('');
-  const [sanitizeFilename, setSanitizeFilename] = useState(false);
+  const [sanitizeFilename, setSanitizeFilename] = useState(user?.sanitize_filenames ?? false);
+
+  // Update sanitizeFilename when user loads
+  useEffect(() => {
+    setSanitizeFilename(user?.sanitize_filenames ?? false);
+  }, [user?.sanitize_filenames]);
 
   // Page filtering/sorting state
   const [statusFilter, setStatusFilter] = useState<PageStatus | 'all'>('all');
@@ -59,6 +74,54 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+
+  // Project settings form state
+  const [editTitle, setEditTitle] = useState('');
+  const [editIsbn, setEditIsbn] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editWidthMm, setEditWidthMm] = useState('');
+  const [editHeightMm, setEditHeightMm] = useState('');
+  const [editStatus, setEditStatus] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Initialize form when project loads
+  useEffect(() => {
+    if (project) {
+      setEditTitle(project.title || '');
+      setEditIsbn(project.isbn || '');
+      setEditDescription(project.description || '');
+      setEditWidthMm(project.width_mm?.toString() || '');
+      setEditHeightMm(project.height_mm?.toString() || '');
+      setEditStatus(project.status || 'draft');
+    }
+  }, [project]);
+
+  // Save project settings
+  const handleSaveSettings = async () => {
+    if (!editTitle.trim()) {
+      toast.error('Le titre est requis');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      await projectsApi.update(projectId, {
+        title: editTitle.trim(),
+        isbn: editIsbn.trim() || undefined,
+        description: editDescription.trim() || undefined,
+        width_mm: editWidthMm ? parseInt(editWidthMm) : undefined,
+        height_mm: editHeightMm ? parseInt(editHeightMm) : undefined,
+        status: editStatus,
+      });
+      toast.success('Projet mis à jour avec succès');
+      refreshProject();
+    } catch (error) {
+      console.error('Error updating project:', error);
+      toast.error(error instanceof Error ? error.message : 'Erreur lors de la mise à jour');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   // Fetch dashboard data
   const fetchDashboard = useCallback(async () => {
@@ -174,12 +237,34 @@ export default function ProjectPage({ params }: ProjectPageProps) {
   return (
     <>
       <Header title={project.title} description={project.isbn ? `ISBN: ${project.isbn}` : undefined}>
-        <Button variant="outline" asChild>
-          <Link href="/projects">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Retour
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const blob = await filesApi.downloadProject(projectId, true);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${project.title.replace(/[^a-zA-Z0-9-_]/g, '_')}_complet.pdf`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success('Téléchargement en cours...');
+              } catch (error) {
+                toast.error('Erreur lors du téléchargement');
+              }
+            }}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Télécharger PDF
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/projects">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Retour
+            </Link>
+          </Button>
+        </div>
       </Header>
 
       <main className="flex-1 space-y-6 p-6">
@@ -306,6 +391,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
               files={projectFiles}
               onRefresh={fetchFiles}
               isLoading={filesLoading}
+              defaultSanitizeFilename={user?.sanitize_filenames ?? false}
             />
           </TabsContent>
 
@@ -454,47 +540,125 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
           <TabsContent value="settings" className="mt-4">
             <Card>
-              <CardContent className="p-4">
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="font-medium">Informations du projet</h3>
-                    <dl className="mt-2 space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <dt className="text-muted-foreground">Titre</dt>
-                        <dd>{project.title}</dd>
-                      </div>
-                      {project.isbn && (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">ISBN</dt>
-                          <dd>{project.isbn}</dd>
-                        </div>
-                      )}
-                      {project.publisher_name && (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">Maison d&apos;édition</dt>
-                          <dd>{project.publisher_name}</dd>
-                        </div>
-                      )}
-                      {formatDisplay && (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">Format</dt>
-                          <dd>{formatDisplay}</dd>
-                        </div>
-                      )}
-                      <div className="flex justify-between">
-                        <dt className="text-muted-foreground">Nombre de pages</dt>
-                        <dd>{project.total_pages}</dd>
-                      </div>
-                      <div className="flex justify-between">
-                        <dt className="text-muted-foreground">Créé par</dt>
-                        <dd>{project.creator_name}</dd>
-                      </div>
-                      <div className="flex justify-between">
-                        <dt className="text-muted-foreground">Créé le</dt>
-                        <dd>{new Date(project.created_at).toLocaleDateString('fr-FR')}</dd>
-                      </div>
-                    </dl>
+              <CardHeader>
+                <CardTitle className="text-lg">Paramètres du projet</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Editable fields */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-title">Titre *</Label>
+                    <Input
+                      id="edit-title"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      placeholder="Titre du projet"
+                    />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-isbn">ISBN</Label>
+                    <Input
+                      id="edit-isbn"
+                      value={editIsbn}
+                      onChange={(e) => setEditIsbn(e.target.value)}
+                      placeholder="978-2-1234-5678-9"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-description">Description</Label>
+                  <Textarea
+                    id="edit-description"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    placeholder="Description du projet..."
+                    rows={3}
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-width">Largeur (mm)</Label>
+                    <Input
+                      id="edit-width"
+                      type="number"
+                      min="50"
+                      max="1000"
+                      value={editWidthMm}
+                      onChange={(e) => setEditWidthMm(e.target.value)}
+                      placeholder="210"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-height">Hauteur (mm)</Label>
+                    <Input
+                      id="edit-height"
+                      type="number"
+                      min="50"
+                      max="1000"
+                      value={editHeightMm}
+                      onChange={(e) => setEditHeightMm(e.target.value)}
+                      placeholder="297"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-status">Statut</Label>
+                    <Select value={editStatus} onValueChange={setEditStatus}>
+                      <SelectTrigger id="edit-status">
+                        <SelectValue placeholder="Sélectionner un statut" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="draft">Brouillon</SelectItem>
+                        <SelectItem value="in_progress">En cours</SelectItem>
+                        <SelectItem value="bat">BAT</SelectItem>
+                        <SelectItem value="completed">Terminé</SelectItem>
+                        <SelectItem value="archived">Archivé</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Read-only info */}
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <h4 className="mb-3 text-sm font-medium text-muted-foreground">Informations non modifiables</h4>
+                  <dl className="grid gap-2 text-sm md:grid-cols-2">
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Nombre de pages</dt>
+                      <dd className="font-medium">{project.total_pages}</dd>
+                    </div>
+                    {project.publisher_name && (
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Maison d&apos;édition</dt>
+                        <dd className="font-medium">{project.publisher_name}</dd>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Créé par</dt>
+                      <dd className="font-medium">{project.creator_name}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Créé le</dt>
+                      <dd className="font-medium">{new Date(project.created_at).toLocaleDateString('fr-FR')}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                {/* Save button */}
+                <div className="flex justify-end">
+                  <Button onClick={handleSaveSettings} disabled={isSavingSettings}>
+                    {isSavingSettings ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Enregistrement...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Enregistrer les modifications
+                      </>
+                    )}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

@@ -106,7 +106,8 @@ const schemas = {
       height: Joi.number(),
       page_number: Joi.number().integer().required()
     }).required(),
-    color: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).default('#FFFF00')
+    color: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).default('#FFFF00'),
+    file_id: Joi.number().integer().optional()
   })
 };
 

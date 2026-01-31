@@ -33,6 +33,7 @@ export interface User {
   is_active: boolean;
   created_at: string;
   last_login?: string;
+  sanitize_filenames?: boolean;
 }
 
 export interface AuthResponse {
@@ -148,10 +149,14 @@ export interface FileItem {
   file_type: string;
   file_size: number;
   uploaded_by: number;
+  uploaded_by_name?: string;
   uploaded_at: string;
+  version?: number;
+  is_current?: boolean;
 }
 
 export type AnnotationType = 'comment' | 'highlight' | 'drawing' | 'stamp' | 'ink';
+export type AnnotationStatus = 'open' | 'resolved' | 'rejected';
 
 export interface AnnotationPosition {
   x: number;
@@ -170,11 +175,30 @@ export interface Annotation {
   position?: AnnotationPosition | string;  // Can be string from database
   color?: string;
   resolved: boolean;
+  status?: AnnotationStatus;
+  status_reason?: string;
   created_by: number;
   author_name?: string;
   author_role?: UserRole;
   created_at: string;
   updated_at: string;
+  // Version tracking
+  created_in_file_id?: number;
+  created_in_version?: number;
+  resolved_in_version?: number;
+  resolved_in_version_number?: number;
+  // Reply count
+  reply_count?: number;
+}
+
+export interface AnnotationReply {
+  id: number;
+  annotation_id: number;
+  content: string;
+  created_by: number;
+  author_name?: string;
+  author_role?: UserRole;
+  created_at: string;
 }
 
 export interface WorkflowHistory {

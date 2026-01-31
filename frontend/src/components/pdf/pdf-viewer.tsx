@@ -527,8 +527,8 @@ export function PDFViewer({
                   const pos = parsePosition(annotation.position);
                   if (!pos) return null;
 
-                  const commentAnnotations = annotations.filter(a => a.type !== 'highlight' && a.type !== 'ink');
-                  const globalIndex = commentAnnotations.findIndex(a => a.id === annotation.id) + 1;
+                  // Global index: number ALL annotations in order (1, 2, 3...)
+                  const globalIndex = annotations.findIndex(a => a.id === annotation.id) + 1;
 
                   const isHighlight = annotation.type === 'highlight' &&
                     pos.width !== undefined && pos.width > 0 &&
@@ -540,26 +540,49 @@ export function PDFViewer({
                     return (
                       <div
                         key={annotation.id}
-                        className={cn(
-                          'absolute pointer-events-auto cursor-pointer transition-all duration-300',
-                          annotation.resolved ? 'opacity-30' : 'opacity-60 hover:opacity-80',
-                          isHighlighted && 'animate-pulse ring-4 ring-blue-500 ring-offset-2'
-                        )}
+                        className="absolute"
                         style={{
                           left: `${pos.x}%`,
                           top: `${pos.y}%`,
                           width: `${pos.width}%`,
                           height: `${pos.height}%`,
-                          backgroundColor: annotation.color || '#FFFF00',
                           zIndex: isHighlighted ? 150 : 50,
-                          mixBlendMode: 'multiply',
                         }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAnnotationClick?.(annotation);
-                        }}
-                        title={annotation.content}
-                      />
+                      >
+                        {/* Highlight overlay */}
+                        <div
+                          className={cn(
+                            'w-full h-full pointer-events-auto cursor-pointer transition-all duration-300',
+                            annotation.resolved ? 'opacity-30' : 'opacity-60 hover:opacity-80',
+                            isHighlighted && 'animate-pulse ring-4 ring-blue-500 ring-offset-2'
+                          )}
+                          style={{
+                            backgroundColor: annotation.color || '#FFFF00',
+                            mixBlendMode: 'multiply',
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAnnotationClick?.(annotation);
+                          }}
+                          title={annotation.content}
+                        />
+                        {/* Number badge on highlight */}
+                        <div
+                          className={cn(
+                            'absolute -top-3 -left-3 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer transition-all shadow-lg border-2 pointer-events-auto',
+                            annotation.resolved
+                              ? 'bg-green-500 text-white border-white'
+                              : 'bg-yellow-500 text-white border-white',
+                            isHighlighted && 'scale-125'
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAnnotationClick?.(annotation);
+                          }}
+                        >
+                          {annotation.resolved ? '✓' : globalIndex}
+                        </div>
+                      </div>
                     );
                   }
 
@@ -571,7 +594,9 @@ export function PDFViewer({
                         'absolute w-8 h-8 -ml-4 -mt-4 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer transition-all shadow-lg border-2 pointer-events-auto',
                         annotation.resolved
                           ? 'bg-green-500 text-white border-white'
-                          : 'bg-red-500 text-white border-white',
+                          : annotation.type === 'ink'
+                            ? 'bg-purple-500 text-white border-white'
+                            : 'bg-red-500 text-white border-white',
                         isHighlighted
                           ? 'scale-150 ring-4 ring-blue-500 ring-offset-2 animate-bounce z-[200]'
                           : 'hover:scale-125'
@@ -587,7 +612,7 @@ export function PDFViewer({
                       }}
                       title={annotation.content}
                     >
-                      {annotation.resolved ? '✓' : globalIndex || annotation.id}
+                      {annotation.resolved ? '✓' : globalIndex}
                     </div>
                   );
                 })}

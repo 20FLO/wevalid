@@ -439,6 +439,243 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ============================================
+// TÉLÉCHARGEMENT MULTI-PAGES
+// ============================================
+
+// Télécharger plusieurs pages en un seul PDF
+router.post('/download-multi', async (req, res) => {
+  const { page_ids, include_annotations = true } = req.body;
+
+  if (!page_ids || !Array.isArray(page_ids) || page_ids.length === 0) {
+    return res.status(400).json({ error: { message: 'page_ids requis (tableau de IDs de pages)' } });
+  }
+
+  try {
+    // Get files for each page (latest version)
+    const filesResult = await pool.query(
+      `SELECT f.*, p.page_number, p.project_id
+       FROM files f
+       JOIN pages p ON f.page_id = p.id
+       WHERE f.page_id = ANY($1) AND f.is_current = true
+       ORDER BY p.page_number`,
+      [page_ids]
+    );
+
+    if (filesResult.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Aucun fichier trouvé pour ces pages' } });
+    }
+
+    const files = filesResult.rows;
+    const projectId = files[0].project_id;
+
+    // Verify all pages belong to same project
+    const allSameProject = files.every(f => f.project_id === projectId);
+    if (!allSameProject) {
+      return res.status(400).json({ error: { message: 'Toutes les pages doivent appartenir au même projet' } });
+    }
+
+    // Check if all files are PDFs
+    const allPdfs = files.every(f => f.file_type === 'application/pdf');
+    if (!allPdfs) {
+      return res.status(400).json({ error: { message: 'Toutes les pages doivent être des PDFs' } });
+    }
+
+    // Get project name for filename
+    const projectResult = await pool.query('SELECT title FROM projects WHERE id = $1', [projectId]);
+    const projectTitle = projectResult.rows[0]?.title || 'projet';
+
+    // Create temp output file
+    const timestamp = Date.now();
+    const outputFilename = `${timestamp}-merged.pdf`;
+    const outputPath = path.join('/app/storage/uploads', outputFilename);
+
+    // If including annotations, we need to embed them first
+    let filesToMerge = files.map(f => f.file_path);
+
+    if (include_annotations) {
+      filesToMerge = [];
+
+      for (const file of files) {
+        // Get annotations for this page
+        const annotationsResult = await pool.query(
+          `SELECT a.*, u.first_name || ' ' || u.last_name as author_name
+           FROM annotations a
+           JOIN users u ON a.created_by = u.id
+           WHERE a.page_id = $1
+           ORDER BY a.created_at`,
+          [file.page_id]
+        );
+
+        const annotations = annotationsResult.rows;
+
+        if (annotations.length > 0) {
+          // Embed annotations
+          const annotatedPath = await embedAnnotationsInPDF(file.file_path, annotations);
+          filesToMerge.push(annotatedPath);
+        } else {
+          filesToMerge.push(file.file_path);
+        }
+      }
+    }
+
+    // Merge PDFs using Ghostscript
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execPromise = promisify(exec);
+
+    const inputFiles = filesToMerge.map(f => `"${f}"`).join(' ');
+    await execPromise(
+      `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -sOutputFile="${outputPath}" ${inputFiles}`
+    );
+
+    // Clean up temp annotated files
+    if (include_annotations) {
+      for (const tempPath of filesToMerge) {
+        if (tempPath.includes('annotated-') && tempPath !== files.find(f => f.file_path === tempPath)?.file_path) {
+          try {
+            await fs.unlink(tempPath);
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    }
+
+    // Send the merged file
+    const sanitizedTitle = projectTitle.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+    const downloadName = `${sanitizedTitle}_pages_${files[0].page_number}-${files[files.length - 1].page_number}.pdf`;
+
+    res.download(outputPath, downloadName, async (err) => {
+      // Clean up merged file after download
+      try {
+        await fs.unlink(outputPath);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+
+      if (err) {
+        logger.error('Erreur envoi fichier fusionné:', err);
+      }
+    });
+
+    logger.info('Téléchargement multi-pages:', {
+      projectId,
+      pageCount: files.length,
+      includeAnnotations: include_annotations,
+      downloadedBy: req.user.id
+    });
+
+  } catch (error) {
+    logger.error('Erreur téléchargement multi-pages:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// Télécharger toutes les pages d'un projet
+router.get('/download-project/:projectId', async (req, res) => {
+  const { projectId } = req.params;
+  const includeAnnotations = req.query.annotations !== 'false';
+
+  try {
+    // Get all pages with their latest files
+    const filesResult = await pool.query(
+      `SELECT f.*, p.page_number
+       FROM files f
+       JOIN pages p ON f.page_id = p.id
+       WHERE p.project_id = $1 AND f.is_current = true AND f.file_type = 'application/pdf'
+       ORDER BY p.page_number`,
+      [projectId]
+    );
+
+    if (filesResult.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Aucun fichier PDF trouvé pour ce projet' } });
+    }
+
+    const files = filesResult.rows;
+
+    // Get project name
+    const projectResult = await pool.query('SELECT title FROM projects WHERE id = $1', [projectId]);
+    const projectTitle = projectResult.rows[0]?.title || 'projet';
+
+    // Create temp output file
+    const timestamp = Date.now();
+    const outputFilename = `${timestamp}-complete.pdf`;
+    const outputPath = path.join('/app/storage/uploads', outputFilename);
+
+    let filesToMerge = files.map(f => f.file_path);
+
+    if (includeAnnotations) {
+      filesToMerge = [];
+
+      for (const file of files) {
+        const annotationsResult = await pool.query(
+          `SELECT a.*, u.first_name || ' ' || u.last_name as author_name
+           FROM annotations a
+           JOIN users u ON a.created_by = u.id
+           WHERE a.page_id = $1
+           ORDER BY a.created_at`,
+          [file.page_id]
+        );
+
+        const annotations = annotationsResult.rows;
+
+        if (annotations.length > 0) {
+          const annotatedPath = await embedAnnotationsInPDF(file.file_path, annotations);
+          filesToMerge.push(annotatedPath);
+        } else {
+          filesToMerge.push(file.file_path);
+        }
+      }
+    }
+
+    // Merge PDFs
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execPromise = promisify(exec);
+
+    const inputFiles = filesToMerge.map(f => `"${f}"`).join(' ');
+    await execPromise(
+      `gs -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -sOutputFile="${outputPath}" ${inputFiles}`
+    );
+
+    // Cleanup temp files
+    if (includeAnnotations) {
+      for (const tempPath of filesToMerge) {
+        if (tempPath.includes('annotated-')) {
+          try {
+            await fs.unlink(tempPath);
+          } catch (e) {
+            // Ignore
+          }
+        }
+      }
+    }
+
+    const sanitizedTitle = projectTitle.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+    const downloadName = `${sanitizedTitle}_complet.pdf`;
+
+    res.download(outputPath, downloadName, async () => {
+      try {
+        await fs.unlink(outputPath);
+      } catch (e) {
+        // Ignore
+      }
+    });
+
+    logger.info('Téléchargement projet complet:', {
+      projectId,
+      pageCount: files.length,
+      includeAnnotations,
+      downloadedBy: req.user.id
+    });
+
+  } catch (error) {
+    logger.error('Erreur téléchargement projet:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
 // Récupérer l'historique des versions d'une page
 router.get('/page/:pageId/history', async (req, res) => {
   const { pageId } = req.params;

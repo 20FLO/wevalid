@@ -24,7 +24,31 @@ export interface UpdateUserData {
   role?: UserRole;
 }
 
+export interface UpdateProfileData {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  sanitize_filenames?: boolean;
+}
+
+export interface ChangePasswordData {
+  current_password: string;
+  new_password: string;
+}
+
 export const usersApi = {
+  async getMe(): Promise<{ user: User }> {
+    return apiClient.get('/users/me');
+  },
+
+  async updateMe(data: UpdateProfileData): Promise<{ message: string; user: User }> {
+    return apiClient.put('/users/me', data);
+  },
+
+  async changePassword(data: ChangePasswordData): Promise<{ message: string }> {
+    return apiClient.put('/users/me/password', data);
+  },
+
   async getAll(filters?: UsersFilters): Promise<{ users: User[] }> {
     const params = new URLSearchParams();
     if (filters?.role) params.append('role', filters.role);

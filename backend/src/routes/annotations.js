@@ -13,18 +13,35 @@ router.use(authenticateToken);
 // Récupérer toutes les annotations d'une page
 router.get('/page/:pageId', async (req, res) => {
   const { pageId } = req.params;
+  const { file_id } = req.query; // Optional: filter by file version
 
   try {
-    const result = await pool.query(
-      `SELECT a.*,
-              u.first_name || ' ' || u.last_name as author_name,
-              u.role as author_role
-       FROM annotations a
-       JOIN users u ON a.created_by = u.id
-       WHERE a.page_id = $1
-       ORDER BY a.created_at DESC`,
-      [pageId]
-    );
+    let query = `
+      SELECT a.*,
+             u.first_name || ' ' || u.last_name as author_name,
+             u.role as author_role,
+             COALESCE(a.status, CASE WHEN a.resolved THEN 'resolved' ELSE 'open' END) as status,
+             rv.version as resolved_in_version_number,
+             (SELECT COUNT(*) FROM annotation_replies ar WHERE ar.annotation_id = a.id) as reply_count,
+             cf.version as created_in_version,
+             cf.id as created_in_file_id
+      FROM annotations a
+      JOIN users u ON a.created_by = u.id
+      LEFT JOIN files rv ON a.resolved_in_version = rv.id
+      LEFT JOIN files cf ON a.created_in_file_id = cf.id
+      WHERE a.page_id = $1
+    `;
+    const params = [pageId];
+
+    // If file_id is provided, include annotations from that version and earlier
+    if (file_id) {
+      query += ` AND (a.created_in_file_id IS NULL OR a.created_in_file_id <= $2)`;
+      params.push(file_id);
+    }
+
+    query += ` ORDER BY a.created_at DESC`;
+
+    const result = await pool.query(query, params);
 
     res.json({ annotations: result.rows });
   } catch (error) {
@@ -35,7 +52,7 @@ router.get('/page/:pageId', async (req, res) => {
 
 // Créer une annotation (tous les membres authentifiés)
 router.post('/', validate(schemas.createAnnotation), async (req, res) => {
-  const { page_id, type, content, position, color } = req.validatedBody;
+  const { page_id, type, content, position, color, file_id } = req.validatedBody;
 
   try {
     const pageCheck = await pool.query('SELECT id FROM pages WHERE id = $1', [page_id]);
@@ -43,11 +60,19 @@ router.post('/', validate(schemas.createAnnotation), async (req, res) => {
       return res.status(404).json({ error: { message: 'Page non trouvée' } });
     }
 
+    // If file_id provided, verify it belongs to this page
+    if (file_id) {
+      const fileCheck = await pool.query('SELECT id FROM files WHERE id = $1 AND page_id = $2', [file_id, page_id]);
+      if (fileCheck.rows.length === 0) {
+        return res.status(400).json({ error: { message: 'Fichier invalide pour cette page' } });
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO annotations (page_id, type, content, position, color, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO annotations (page_id, type, content, position, color, created_by, created_in_file_id, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')
        RETURNING *`,
-      [page_id, type, content, JSON.stringify(position), color, req.user.id]
+      [page_id, type, content, JSON.stringify(position), color, req.user.id, file_id || null]
     );
 
     const annotation = result.rows[0];
@@ -55,6 +80,7 @@ router.post('/', validate(schemas.createAnnotation), async (req, res) => {
     logger.info('Annotation créée:', {
       annotationId: annotation.id,
       pageId: page_id,
+      fileId: file_id,
       createdBy: req.user.id
     });
 
@@ -85,8 +111,8 @@ router.put('/:id', async (req, res) => {
 
     const annotation = currentAnnotation.rows[0];
 
-    if (req.user.role !== 'admin' && 
-        annotation.created_by !== req.user.id && 
+    if (req.user.role !== 'admin' &&
+        annotation.created_by !== req.user.id &&
         typeof resolved === 'undefined') {
       return res.status(403).json({ error: { message: 'Seul le créateur peut modifier cette annotation' } });
     }
@@ -95,7 +121,11 @@ router.put('/:id', async (req, res) => {
     if (content) updates.content = content;
     if (position) updates.position = JSON.stringify(position);
     if (color) updates.color = color;
-    if (typeof resolved === 'boolean') updates.resolved = resolved;
+    // Backward compatibility: resolved boolean maps to status
+    if (typeof resolved === 'boolean') {
+      updates.resolved = resolved;
+      updates.status = resolved ? 'resolved' : 'open';
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: { message: 'Aucune donnée à mettre à jour' } });
@@ -118,6 +148,182 @@ router.put('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Erreur lors de la mise à jour de l\'annotation:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// Changer le statut d'une annotation (open, resolved, rejected)
+router.put('/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status, status_reason, resolved_in_version } = req.body;
+
+  if (!status || !['open', 'resolved', 'rejected'].includes(status)) {
+    return res.status(400).json({
+      error: { message: 'Statut invalide. Valeurs acceptées: open, resolved, rejected' }
+    });
+  }
+
+  try {
+    const currentAnnotation = await pool.query(
+      'SELECT * FROM annotations WHERE id = $1',
+      [id]
+    );
+
+    if (currentAnnotation.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Annotation non trouvée' } });
+    }
+
+    // Only admin/editeur can reject, anyone can resolve
+    if (status === 'rejected' && req.user.role !== 'admin' && req.user.role !== 'editeur') {
+      return res.status(403).json({
+        error: { message: 'Seuls les administrateurs et éditeurs peuvent refuser une annotation' }
+      });
+    }
+
+    const updates = {
+      status,
+      resolved: status === 'resolved',
+      status_reason: status === 'rejected' ? (status_reason || null) : null,
+      resolved_in_version: status === 'resolved' ? (resolved_in_version || null) : null
+    };
+
+    const result = await pool.query(
+      `UPDATE annotations
+       SET status = $1, resolved = $2, status_reason = $3, resolved_in_version = $4, updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [updates.status, updates.resolved, updates.status_reason, updates.resolved_in_version, id]
+    );
+
+    logger.info('Statut annotation mis à jour:', {
+      annotationId: id,
+      newStatus: status,
+      updatedBy: req.user.id
+    });
+
+    res.json({
+      message: 'Statut mis à jour avec succès',
+      annotation: result.rows[0]
+    });
+  } catch (error) {
+    logger.error('Erreur lors du changement de statut:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// ============================================
+// RÉPONSES AUX ANNOTATIONS (Fil de discussion)
+// ============================================
+
+// Récupérer les réponses d'une annotation
+router.get('/:id/replies', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const annotationCheck = await pool.query('SELECT id FROM annotations WHERE id = $1', [id]);
+    if (annotationCheck.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Annotation non trouvée' } });
+    }
+
+    const result = await pool.query(
+      `SELECT ar.*,
+              u.first_name || ' ' || u.last_name as author_name,
+              u.role as author_role
+       FROM annotation_replies ar
+       LEFT JOIN users u ON ar.created_by = u.id
+       WHERE ar.annotation_id = $1
+       ORDER BY ar.created_at ASC`,
+      [id]
+    );
+
+    res.json({ replies: result.rows });
+  } catch (error) {
+    logger.error('Erreur lors de la récupération des réponses:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// Ajouter une réponse à une annotation
+router.post('/:id/replies', async (req, res) => {
+  const { id } = req.params;
+  const { content } = req.body;
+
+  if (!content || content.trim().length === 0) {
+    return res.status(400).json({ error: { message: 'Le contenu de la réponse est requis' } });
+  }
+
+  try {
+    const annotationCheck = await pool.query('SELECT id, page_id FROM annotations WHERE id = $1', [id]);
+    if (annotationCheck.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Annotation non trouvée' } });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO annotation_replies (annotation_id, content, created_by)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [id, content.trim(), req.user.id]
+    );
+
+    const reply = result.rows[0];
+
+    // Get author info
+    const userResult = await pool.query(
+      `SELECT first_name || ' ' || last_name as author_name, role as author_role
+       FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    reply.author_name = userResult.rows[0]?.author_name;
+    reply.author_role = userResult.rows[0]?.author_role;
+
+    logger.info('Réponse ajoutée:', {
+      annotationId: id,
+      replyId: reply.id,
+      createdBy: req.user.id
+    });
+
+    res.status(201).json({
+      message: 'Réponse ajoutée avec succès',
+      reply
+    });
+  } catch (error) {
+    logger.error('Erreur lors de l\'ajout de la réponse:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  }
+});
+
+// Supprimer une réponse (admin, editeur, ou auteur de la réponse)
+router.delete('/:annotationId/replies/:replyId', async (req, res) => {
+  const { annotationId, replyId } = req.params;
+
+  try {
+    const reply = await pool.query(
+      'SELECT created_by FROM annotation_replies WHERE id = $1 AND annotation_id = $2',
+      [replyId, annotationId]
+    );
+
+    if (reply.rows.length === 0) {
+      return res.status(404).json({ error: { message: 'Réponse non trouvée' } });
+    }
+
+    if (req.user.role !== 'admin' &&
+        req.user.role !== 'editeur' &&
+        reply.rows[0].created_by !== req.user.id) {
+      return res.status(403).json({ error: { message: 'Accès refusé' } });
+    }
+
+    await pool.query('DELETE FROM annotation_replies WHERE id = $1', [replyId]);
+
+    logger.info('Réponse supprimée:', {
+      annotationId,
+      replyId,
+      deletedBy: req.user.id
+    });
+
+    res.json({ message: 'Réponse supprimée avec succès' });
+  } catch (error) {
+    logger.error('Erreur lors de la suppression de la réponse:', error);
     res.status(500).json({ error: { message: 'Erreur serveur' } });
   }
 });
@@ -267,81 +473,101 @@ router.post('/page/:pageId/import-xfdf', async (req, res) => {
 
 function generateXFDF(page, annotations) {
   const pdfFilename = page.original_filename || page.filename || 'document.pdf';
-  
+
   let xfdf = `<?xml version="1.0" encoding="UTF-8"?>
 <xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">
   <f href="${pdfFilename}"/>
   <annots>`;
 
-  for (const annot of annotations) {
+  // Process annotations with their index (number)
+  annotations.forEach((annot, index) => {
+    const annotNumber = index + 1; // 1-based numbering
     const position = typeof annot.position === 'string' ? JSON.parse(annot.position) : annot.position;
     const rect = positionToRect(position);
     const color = hexToRGB(annot.color || '#FFFF00');
     const date = formatXFDFDate(annot.created_at);
 
+    // Include number in the content for easy identification
+    const contentWithNumber = `[${annotNumber}] ${annot.content || ''}`;
+    const statusLabel = annot.resolved ? ' ✓' : '';
+
     switch (annot.type) {
       case 'comment':
       case 'question':
         xfdf += `
-    <text page="0" rect="${rect}" color="${color}" 
-          title="${escapeXML(annot.author_name)}" 
-          subject="${annot.type === 'question' ? 'Question' : 'Commentaire'}"
-          date="${date}" 
+    <text page="0" rect="${rect}" color="${color}"
+          title="${escapeXML(annot.author_name)}${statusLabel}"
+          subject="#${annotNumber} ${annot.type === 'question' ? 'Question' : 'Commentaire'}"
+          date="${date}"
           name="wevalid-${annot.id}"
           flags="print"
           icon="Comment">
-      <contents>${escapeXML(annot.content)}</contents>
+      <contents>${escapeXML(contentWithNumber)}</contents>
     </text>`;
         break;
 
       case 'correction':
         xfdf += `
-    <text page="0" rect="${rect}" color="#FF0000" 
-          title="${escapeXML(annot.author_name)}" 
-          subject="Correction"
+    <text page="0" rect="${rect}" color="#FF0000"
+          title="${escapeXML(annot.author_name)}${statusLabel}"
+          subject="#${annotNumber} Correction"
           date="${date}"
           name="wevalid-${annot.id}"
           flags="print"
           icon="Key">
-      <contents>${escapeXML(annot.content)}</contents>
+      <contents>${escapeXML(contentWithNumber)}</contents>
     </text>`;
         break;
 
       case 'validation':
         xfdf += `
     <stamp page="0" rect="${rect}" color="#00FF00"
-           title="${escapeXML(annot.author_name)}"
-           subject="Validation"
+           title="${escapeXML(annot.author_name)}${statusLabel}"
+           subject="#${annotNumber} Validation"
            date="${date}"
            name="wevalid-${annot.id}"
            flags="print"
            icon="Approved">
-      <contents>${escapeXML(annot.content)}</contents>
+      <contents>${escapeXML(contentWithNumber)}</contents>
     </stamp>`;
         break;
 
       case 'highlight':
         xfdf += `
     <highlight page="0" rect="${rect}" color="${color}"
-               title="${escapeXML(annot.author_name)}"
+               title="${escapeXML(annot.author_name)}${statusLabel}"
+               subject="#${annotNumber} Surlignage"
                date="${date}"
                name="wevalid-${annot.id}"
                flags="print">
-      <contents>${escapeXML(annot.content || '')}</contents>
+      <contents>${escapeXML(contentWithNumber)}</contents>
     </highlight>`;
+        break;
+
+      case 'ink':
+        xfdf += `
+    <ink page="0" rect="${rect}" color="${color}"
+         title="${escapeXML(annot.author_name)}${statusLabel}"
+         subject="#${annotNumber} Dessin"
+         date="${date}"
+         name="wevalid-${annot.id}"
+         flags="print">
+      <contents>${escapeXML(contentWithNumber)}</contents>
+    </ink>`;
         break;
 
       default:
         xfdf += `
     <text page="0" rect="${rect}" color="${color}"
-          title="${escapeXML(annot.author_name)}"
+          title="${escapeXML(annot.author_name)}${statusLabel}"
+          subject="#${annotNumber} Note"
           date="${date}"
           name="wevalid-${annot.id}"
           flags="print">
-      <contents>${escapeXML(annot.content)}</contents>
+      <contents>${escapeXML(contentWithNumber)}</contents>
     </text>`;
     }
-  }
+  });
 
   xfdf += `
   </annots>
