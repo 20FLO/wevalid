@@ -285,16 +285,21 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     );
   }
 
-  const currentFile = page.files?.[0];
+  // Use latest_file_id to find the correct file, fallback to first file
+  const currentFile = page.latest_file_id
+    ? page.files?.find(f => f.id === page.latest_file_id) || page.files?.[0]
+    : page.files?.[0];
+
   const thumbnailUrl = page.latest_file_id
     ? filesApi.getThumbnailUrl(page.latest_file_id)
     : currentFile
     ? filesApi.getThumbnailUrl(currentFile.id)
     : null;
 
-  // Check if current file is a PDF
+  // Check if current file is a PDF - use latest_file_id if available
+  const fileIdForPdf = page.latest_file_id || currentFile?.id;
   const isPDF = currentFile?.file_type === 'application/pdf' || currentFile?.original_filename?.endsWith('.pdf');
-  const pdfUrl = currentFile ? filesApi.getDownloadUrl(currentFile.id) : null;
+  const pdfUrl = fileIdForPdf ? filesApi.getDownloadUrl(fileIdForPdf) : null;
 
   // Check if page is locked (BAT validé or sent to printer)
   const isLocked = LOCKED_STATUSES.includes(page.status);
