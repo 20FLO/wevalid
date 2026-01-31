@@ -55,8 +55,10 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
   // PDF upload state - use user preference as default
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [isUploadingWithLabels, setIsUploadingWithLabels] = useState(false);
   const [uploadStartPage, setUploadStartPage] = useState<string>('');
   const [sanitizeFilename, setSanitizeFilename] = useState(user?.sanitize_filenames ?? false);
+  const labelsInputRef = useRef<HTMLInputElement>(null);
 
   // Update sanitizeFilename when user loads
   useEffect(() => {
@@ -197,6 +199,43 @@ export default function ProjectPage({ params }: ProjectPageProps) {
       toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'upload');
     } finally {
       setIsUploadingPdf(false);
+    }
+  };
+
+  // Handle upload with automatic page label detection
+  const handleUploadWithLabels = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingWithLabels(true);
+    try {
+      const result = await filesApi.uploadWithLabels(projectId, Array.from(files), {
+        sanitizeFilename,
+      });
+
+      // Show detailed results
+      const successCount = result.assignments.filter(a => a.status === 'success').length;
+      const skippedCount = result.assignments.filter(a => a.status === 'skipped').length;
+
+      if (skippedCount > 0) {
+        const skippedFiles = result.assignments
+          .filter(a => a.status === 'skipped')
+          .map(a => a.filename)
+          .join(', ');
+        toast.warning(`${successCount} fichier(s) importé(s), ${skippedCount} ignoré(s): ${skippedFiles}`);
+      } else {
+        toast.success(`${successCount} fichier(s) importé(s) aux bonnes positions`);
+      }
+
+      // Refresh
+      refreshPages();
+      refreshProject();
+      fetchDashboard();
+      if (labelsInputRef.current) labelsInputRef.current.value = '';
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'upload');
+    } finally {
+      setIsUploadingWithLabels(false);
     }
   };
 
@@ -455,6 +494,41 @@ export default function ProjectPage({ params }: ProjectPageProps) {
                       className="hidden"
                       onChange={handlePdfUpload}
                     />
+                  </div>
+
+                  {/* Upload avec Page Labels */}
+                  <div className="border-t pt-4 mt-4">
+                    <p className="text-sm font-medium mb-2">Upload avec détection automatique (Page Labels)</p>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Uploadez des PDFs individuels - ils seront automatiquement placés à la bonne position selon leurs Page Labels ou le numéro dans le nom de fichier.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        disabled={isUploadingWithLabels}
+                        onClick={() => labelsInputRef.current?.click()}
+                      >
+                        {isUploadingWithLabels ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Import...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Import avec Page Labels
+                          </>
+                        )}
+                      </Button>
+                      <input
+                        ref={labelsInputRef}
+                        type="file"
+                        accept=".pdf"
+                        multiple
+                        className="hidden"
+                        onChange={handleUploadWithLabels}
+                      />
+                    </div>
                   </div>
                 </div>
               </CardContent>

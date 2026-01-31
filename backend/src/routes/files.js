@@ -166,6 +166,194 @@ router.post('/upload', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur')
   }
 });
 
+// Upload de fichier(s) avec détection automatique de la position via Page Labels
+router.post('/upload-with-labels', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.array('files', 50), async (req, res) => {
+  const { project_id, extract_annotations } = req.body;
+
+  if (!project_id) {
+    return res.status(400).json({ error: { message: 'project_id requis' } });
+  }
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: { message: 'Aucun fichier uploadé' } });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Vérifier le projet
+    const projectCheck = await client.query('SELECT id, total_pages FROM projects WHERE id = $1', [project_id]);
+    if (projectCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: { message: 'Projet non trouvé' } });
+    }
+
+    // Récupérer toutes les pages du projet
+    const pagesResult = await client.query(
+      'SELECT id, page_number FROM pages WHERE project_id = $1 ORDER BY page_number',
+      [project_id]
+    );
+    const projectPages = pagesResult.rows;
+    const projectPagesByNumber = {};
+    for (const page of projectPages) {
+      projectPagesByNumber[page.page_number] = page;
+    }
+
+    const uploadedFiles = [];
+    const assignments = [];
+    let extractedAnnotationsCount = 0;
+
+    for (const file of req.files) {
+      let targetPageId = null;
+      let targetPageNumber = null;
+      let detectedLabel = null;
+
+      // Pour les PDFs, extraire le page label
+      if (file.mimetype === 'application/pdf') {
+        try {
+          const pageLabels = await extractPageLabels(file.path);
+
+          if (pageLabels.length > 0) {
+            // Prendre le label de la première page du PDF
+            const firstLabel = pageLabels[0];
+            detectedLabel = firstLabel.label;
+
+            // Parser le label pour obtenir un numéro de page
+            const pageNumber = parsePageLabel(firstLabel.label);
+
+            if (pageNumber && projectPagesByNumber[pageNumber]) {
+              targetPageId = projectPagesByNumber[pageNumber].id;
+              targetPageNumber = pageNumber;
+            }
+          }
+        } catch (labelError) {
+          logger.warn('Erreur extraction Page Label:', labelError.message);
+        }
+      }
+
+      // Si pas de page trouvée via label, essayer d'extraire un numéro du nom de fichier
+      if (!targetPageId) {
+        const filenameMatch = file.originalname.match(/page[_\-\s]*(\d+)/i) ||
+                              file.originalname.match(/p[_\-\s]*(\d+)/i) ||
+                              file.originalname.match(/(\d+)/);
+
+        if (filenameMatch) {
+          const pageNumber = parseInt(filenameMatch[1]);
+          if (projectPagesByNumber[pageNumber]) {
+            targetPageId = projectPagesByNumber[pageNumber].id;
+            targetPageNumber = pageNumber;
+          }
+        }
+      }
+
+      if (!targetPageId) {
+        // Pas de page cible trouvée, on skip ce fichier
+        assignments.push({
+          filename: file.originalname,
+          status: 'skipped',
+          reason: 'Impossible de déterminer la page cible',
+          detected_label: detectedLabel
+        });
+        continue;
+      }
+
+      // Marquer les anciens fichiers comme non-courants
+      await client.query(
+        'UPDATE files SET is_current = false WHERE page_id = $1 AND is_current = true',
+        [targetPageId]
+      );
+
+      // Obtenir le prochain numéro de version
+      const versionResult = await client.query(
+        'SELECT COALESCE(MAX(version), 0) + 1 as next_version FROM files WHERE page_id = $1',
+        [targetPageId]
+      );
+      const nextVersion = versionResult.rows[0].next_version;
+
+      let thumbnailPath = null;
+
+      if (file.mimetype === 'application/pdf') {
+        thumbnailPath = await generatePDFThumbnail(file.path);
+
+        // Extraire les annotations du PDF si demandé
+        if (extract_annotations !== 'false') {
+          const extractedAnnotations = await extractAnnotationsFromPDF(file.path);
+
+          for (const annot of extractedAnnotations) {
+            if (annot.content && annot.content.trim()) {
+              await client.query(
+                `INSERT INTO annotations (page_id, type, content, position, color, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                  targetPageId,
+                  annot.type,
+                  annot.content,
+                  JSON.stringify(annot.position),
+                  annot.color,
+                  req.user.id
+                ]
+              );
+              extractedAnnotationsCount++;
+            }
+          }
+        }
+      } else if (file.mimetype.startsWith('image/')) {
+        thumbnailPath = await generateImageThumbnail(file.path);
+      }
+
+      const result = await client.query(
+        `INSERT INTO files (page_id, filename, original_filename, file_path, thumbnail_path, file_type, file_size, uploaded_by, is_current, version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          targetPageId,
+          file.filename,
+          file.originalname,
+          file.path,
+          thumbnailPath,
+          file.mimetype,
+          file.size,
+          req.user.id,
+          true,
+          nextVersion
+        ]
+      );
+
+      uploadedFiles.push(result.rows[0]);
+      assignments.push({
+        filename: file.originalname,
+        status: 'success',
+        page_number: targetPageNumber,
+        detected_label: detectedLabel,
+        version: nextVersion
+      });
+
+      logger.info('Fichier uploadé avec Page Label:', {
+        filename: file.originalname,
+        targetPage: targetPageNumber,
+        detectedLabel,
+        version: nextVersion
+      });
+    }
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: `${uploadedFiles.length} fichier(s) uploadé(s) avec succès`,
+      files: uploadedFiles,
+      assignments,
+      annotations_extracted: extractedAnnotationsCount
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('Erreur lors de l\'upload avec labels:', error);
+    res.status(500).json({ error: { message: 'Erreur serveur' } });
+  } finally {
+    client.release();
+  }
+});
+
 // Upload PDF complet avec découpage auto (admin + fabricant + auteurs + éditeurs)
 router.post('/upload-complete-pdf', authorizeRoles('admin', 'fabricant', 'auteur', 'editeur'), upload.single('file'), async (req, res) => {
   const project_id = req.body.project_id || req.query.project_id;

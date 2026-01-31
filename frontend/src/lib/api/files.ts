@@ -9,6 +9,20 @@ export interface UploadOptions {
   sanitizeFilename?: boolean; // Default: true - if false, preserves accents and spaces
 }
 
+export interface UploadWithLabelsResult {
+  message: string;
+  files: FileItem[];
+  assignments: Array<{
+    filename: string;
+    status: 'success' | 'skipped';
+    page_number?: number;
+    detected_label?: string;
+    reason?: string;
+    version?: number;
+  }>;
+  annotations_extracted: number;
+}
+
 export const filesApi = {
   async upload(
     pageId: number,
@@ -82,6 +96,24 @@ export const filesApi = {
     versions: FileItem[];
   }> {
     return apiClient.get(`/files/page/${pageId}/history`);
+  },
+
+  /**
+   * Upload files with automatic page detection via Page Labels
+   * Files are assigned to pages based on their PDF page labels or filename patterns
+   */
+  async uploadWithLabels(
+    projectId: number,
+    files: File[],
+    options?: UploadOptions
+  ): Promise<UploadWithLabelsResult> {
+    const formData = new FormData();
+    formData.append('project_id', String(projectId));
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+    const queryParams = options?.sanitizeFilename === false ? '?sanitize_filename=false' : '';
+    return apiClient.post(`/files/upload-with-labels${queryParams}`, formData);
   },
 
   /**
