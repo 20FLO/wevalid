@@ -23,9 +23,30 @@ async function connectDB() {
     await client.query('SELECT NOW()');
     client.release();
     logger.info('Connexion PostgreSQL établie');
+
+    // Run auto-migrations
+    await runMigrations();
   } catch (error) {
     logger.error('Erreur de connexion PostgreSQL:', error);
     throw error;
+  }
+}
+
+// Auto-migrations au démarrage
+async function runMigrations() {
+  const client = await pool.connect();
+  try {
+    // Migration: Add source tracking columns to files table
+    await client.query(`
+      ALTER TABLE files ADD COLUMN IF NOT EXISTS source_project_file_id INTEGER;
+      ALTER TABLE files ADD COLUMN IF NOT EXISTS source_pdf_page INTEGER;
+    `);
+    logger.info('✓ Migrations appliquées');
+  } catch (error) {
+    // Ignore errors if columns already exist or other non-critical issues
+    logger.warn('Migration warning (peut être ignoré):', error.message);
+  } finally {
+    client.release();
   }
 }
 
