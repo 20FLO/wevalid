@@ -57,15 +57,24 @@ async function extractPageLabels(pdfPath) {
 
 /**
  * Méthode alternative pour extraire les Page Labels avec qpdf
- * Lit directement les objets PageLabels du PDF
+ * Lit directement les objets PageLabels du PDF et génère un label pour chaque page
  */
 async function extractPageLabelsAlternative(pdfPath) {
   try {
+    // D'abord, compter le nombre de pages du PDF
+    let totalPages = 1;
+    try {
+      const { stdout: npages } = await execPromise(`qpdf --show-npages "${pdfPath}" 2>/dev/null`);
+      totalPages = parseInt(npages.trim()) || 1;
+    } catch (e) {
+      logger.warn('Impossible de compter les pages avec qpdf:', e.message);
+    }
+
     // Étape 1: Trouver l'objet PageLabels dans le catalogue
     const { stdout: catalogOutput } = await execPromise(`qpdf --show-object=1 "${pdfPath}" 2>/dev/null || echo ""`);
 
     // Chercher la référence PageLabels (ex: /PageLabels 6 0 R)
-    const pageLabelRefMatch = catalogOutput.match(/\/PageLabels\s+(\d+)\s+0\s+R/);
+    let pageLabelRefMatch = catalogOutput.match(/\/PageLabels\s+(\d+)\s+0\s+R/);
     if (!pageLabelRefMatch) {
       // Essayer de chercher dans tout le PDF
       const { stdout: stringsOutput } = await execPromise(`strings "${pdfPath}" | grep -o "/PageLabels [0-9]* 0 R" | head -1`);
@@ -74,7 +83,7 @@ async function extractPageLabelsAlternative(pdfPath) {
         logger.info('Aucun objet PageLabels trouvé dans le PDF');
         return [];
       }
-      pageLabelRefMatch[1] = altMatch[1];
+      pageLabelRefMatch = altMatch;
     }
 
     const pageLabelObjNum = pageLabelRefMatch[1];
@@ -91,11 +100,13 @@ async function extractPageLabelsAlternative(pdfPath) {
     }
 
     const numsContent = numsMatch[1].trim();
-    const pageLabels = [];
+
+    // Collecter les configurations de labels (peuvent être multiples pour différentes sections)
+    const labelConfigs = [];
 
     // Parser le tableau Nums - peut contenir des références ou des dictionnaires inline
     // Format: pageIndex objRef 0 R ou pageIndex << /S /D /St N >>
-    const refMatches = numsContent.matchAll(/(\d+)\s+(\d+)\s+0\s+R/g);
+    const refMatches = [...numsContent.matchAll(/(\d+)\s+(\d+)\s+0\s+R/g)];
 
     for (const match of refMatches) {
       const pageIndex = parseInt(match[1]);
@@ -114,44 +125,78 @@ async function extractPageLabelsAlternative(pdfPath) {
         const prefix = prefixMatch ? prefixMatch[1] : '';
         const style = styleMatch ? styleMatch[1] : 'D';
 
-        logger.info(`Page ${pageIndex}: label start=${startNumber}, prefix="${prefix}", style=${style}`);
+        logger.info(`Config trouvée - pageIndex=${pageIndex}, start=${startNumber}, prefix="${prefix}", style=${style}`);
 
-        pageLabels.push({
-          pdfPage: pageIndex + 1, // pdfPage est 1-indexed
-          label: prefix + startNumber.toString(),
+        labelConfigs.push({
+          pageIndex: pageIndex, // 0-indexed
           startNumber: startNumber,
+          prefix: prefix,
           style: style
         });
       }
     }
 
     // Aussi chercher les dictionnaires inline << /S /D /St N >>
-    const inlineMatch = numsContent.match(/(\d+)\s*<<([^>]+)>>/);
-    if (inlineMatch && pageLabels.length === 0) {
+    const inlineMatches = [...numsContent.matchAll(/(\d+)\s*<<([^>]+)>>/g)];
+    for (const inlineMatch of inlineMatches) {
       const pageIndex = parseInt(inlineMatch[1]);
       const dictContent = inlineMatch[2];
 
       const stMatch = dictContent.match(/\/St\s+(\d+)/);
       const prefixMatch = dictContent.match(/\/P\s*\(([^)]*)\)/);
+      const styleMatch = dictContent.match(/\/S\s+\/([A-Za-z]+)/);
 
       if (stMatch) {
         const startNumber = parseInt(stMatch[1]);
         const prefix = prefixMatch ? prefixMatch[1] : '';
+        const style = styleMatch ? styleMatch[1] : 'D';
 
-        logger.info(`Page ${pageIndex} (inline): label start=${startNumber}, prefix="${prefix}"`);
+        logger.info(`Config inline trouvée - pageIndex=${pageIndex}, start=${startNumber}, prefix="${prefix}"`);
 
-        pageLabels.push({
-          pdfPage: pageIndex + 1,
-          label: prefix + startNumber.toString(),
-          startNumber: startNumber
+        labelConfigs.push({
+          pageIndex: pageIndex,
+          startNumber: startNumber,
+          prefix: prefix,
+          style: style
         });
       }
     }
 
-    if (pageLabels.length === 0) {
+    if (labelConfigs.length === 0) {
       logger.info('Aucun Page Label trouvé dans le PDF');
+      return [];
     }
 
+    // Trier les configs par pageIndex
+    labelConfigs.sort((a, b) => a.pageIndex - b.pageIndex);
+
+    // Générer un label pour chaque page du PDF
+    const pageLabels = [];
+    for (let pdfPageIndex = 0; pdfPageIndex < totalPages; pdfPageIndex++) {
+      // Trouver la config applicable (la dernière avec pageIndex <= pdfPageIndex)
+      let applicableConfig = null;
+      for (const config of labelConfigs) {
+        if (config.pageIndex <= pdfPageIndex) {
+          applicableConfig = config;
+        } else {
+          break;
+        }
+      }
+
+      if (applicableConfig) {
+        // Calculer le numéro de page: startNumber + (pdfPageIndex - pageIndex de la config)
+        const pageNumber = applicableConfig.startNumber + (pdfPageIndex - applicableConfig.pageIndex);
+        const label = applicableConfig.prefix + pageNumber.toString();
+
+        pageLabels.push({
+          pdfPage: pdfPageIndex + 1, // pdfPage est 1-indexed
+          label: label,
+          startNumber: pageNumber
+        });
+      }
+    }
+
+    logger.info(`${pageLabels.length} Page Labels générés pour ${totalPages} pages`);
     return pageLabels;
   } catch (error) {
     logger.warn('Erreur extraction Page Labels avec qpdf:', error.message);
