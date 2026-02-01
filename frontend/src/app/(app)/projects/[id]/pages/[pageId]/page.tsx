@@ -128,12 +128,12 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [compareMode, setCompareMode] = useState(false);
   const [compareVersion, setCompareVersion] = useState<FileItem | null>(null);
 
-  // Synchronized view state for comparison mode - default to 70vh
+  // Synchronized view state for comparison mode
   const [sharedViewState, setSharedViewState] = useState<ViewState>({
     scale: 1,
     panX: 0,
     panY: 0,
-    containerHeight: typeof window !== 'undefined' ? window.innerHeight * 0.7 : 600
+    containerHeight: typeof window !== 'undefined' ? window.innerHeight - 280 : 500
   });
 
   // Reply state
@@ -538,7 +538,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         onClick={() => {
                           setCompareMode(true);
                           // Reset view state when entering compare mode
-                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: window.innerHeight * 0.7 });
+                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: window.innerHeight - 280 });
                           // Default to previous version for comparison
                           const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
                           const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];
