@@ -189,19 +189,26 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     fetchPageData();
   }, [fetchPageData]);
 
-  // Load users for mentions
+  // Load project members for mentions
   useEffect(() => {
-    const loadUsers = async () => {
+    const loadProjectMembers = async () => {
       try {
-        const { users } = await usersApi.getAll();
-        setMentionUsers(users);
+        const { project } = await projectsApi.getById(projectId);
+        if (project.members && project.members.length > 0) {
+          // Use project members for mentions (cast to User[] as they share essential fields)
+          setMentionUsers(project.members as unknown as User[]);
+        } else {
+          // Fallback to all users if no members defined
+          const { users } = await usersApi.getAll();
+          setMentionUsers(users);
+        }
       } catch (error) {
         // Silently fail - mentions will just not have autocomplete
-        console.warn('Could not load users for mentions:', error);
+        console.warn('Could not load project members for mentions:', error);
       }
     };
-    loadUsers();
-  }, []);
+    loadProjectMembers();
+  }, [projectId]);
 
   // Handle image click for annotation
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
