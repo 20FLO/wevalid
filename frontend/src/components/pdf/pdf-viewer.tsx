@@ -535,11 +535,11 @@ export function PDFViewer({
         )}
       </div>
 
-      {/* PDF Container - Fixed size with overflow hidden */}
+      {/* PDF Container - Resizable height with overflow hidden */}
       <div
         ref={containerRef}
-        className="relative flex-1 overflow-hidden bg-muted/30"
-        style={{ minHeight: '500px' }}
+        className="relative overflow-hidden bg-muted/30 resize-y"
+        style={{ height: '500px', minHeight: '300px', maxHeight: '90vh' }}
       >
         {(isFetching || isLoading) && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -559,7 +559,7 @@ export function PDFViewer({
         {file && !error && (
           <div
             className={cn(
-              'flex justify-center p-4 h-full',
+              'absolute inset-0 flex justify-center items-start p-4 overflow-hidden',
               drawingMode === 'draw' ? 'cursor-crosshair' :
               isPanning ? 'cursor-grabbing' :
               scale > 1 ? 'cursor-grab' : 'cursor-crosshair'
