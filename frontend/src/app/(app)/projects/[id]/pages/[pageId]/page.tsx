@@ -53,8 +53,13 @@ import {
   GitCompareArrows,
   X,
   Layers,
+  MessageCircle,
+  Send,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus } from '@/types';
+import { Input } from '@/components/ui/input';
+import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus, AnnotationReply } from '@/types';
 import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS, LOCKED_STATUSES } from '@/types';
 
 // Import PDF viewer dynamically to avoid SSR issues
@@ -123,6 +128,13 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
   // Synchronized view state for comparison mode
   const [sharedViewState, setSharedViewState] = useState<ViewState>({ scale: 1, panX: 0, panY: 0, containerHeight: 500 });
+
+  // Reply state
+  const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
+  const [repliesCache, setRepliesCache] = useState<Record<number, AnnotationReply[]>>({});
+  const [replyInputs, setReplyInputs] = useState<Record<number, string>>({});
+  const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
+  const [submittingReply, setSubmittingReply] = useState<number | null>(null);
 
   // Fetch page data
   const fetchPageData = useCallback(async () => {
@@ -244,6 +256,80 @@ export default function PageDetailPage({ params }: PageDetailProps) {
       fetchPageData();
     } catch (error) {
       toast.error('Erreur lors de la résolution');
+    }
+  };
+
+  // Toggle replies visibility and load them
+  const toggleReplies = async (annotationId: number) => {
+    const isExpanded = expandedReplies.has(annotationId);
+
+    if (isExpanded) {
+      // Collapse
+      setExpandedReplies(prev => {
+        const next = new Set(prev);
+        next.delete(annotationId);
+        return next;
+      });
+    } else {
+      // Expand and load replies if not cached
+      setExpandedReplies(prev => new Set(prev).add(annotationId));
+
+      if (!repliesCache[annotationId]) {
+        setLoadingReplies(prev => new Set(prev).add(annotationId));
+        try {
+          const { replies } = await annotationsApi.getReplies(annotationId);
+          setRepliesCache(prev => ({ ...prev, [annotationId]: replies }));
+        } catch (error) {
+          toast.error('Erreur lors du chargement des réponses');
+        } finally {
+          setLoadingReplies(prev => {
+            const next = new Set(prev);
+            next.delete(annotationId);
+            return next;
+          });
+        }
+      }
+    }
+  };
+
+  // Submit a reply
+  const handleSubmitReply = async (annotationId: number) => {
+    const content = replyInputs[annotationId]?.trim();
+    if (!content) return;
+
+    setSubmittingReply(annotationId);
+    try {
+      const { reply } = await annotationsApi.addReply(annotationId, content);
+      // Add to cache
+      setRepliesCache(prev => ({
+        ...prev,
+        [annotationId]: [...(prev[annotationId] || []), reply],
+      }));
+      // Clear input
+      setReplyInputs(prev => ({ ...prev, [annotationId]: '' }));
+      // Update annotation reply count in main list
+      fetchPageData();
+      toast.success('Réponse ajoutée');
+    } catch (error) {
+      toast.error('Erreur lors de l\'ajout de la réponse');
+    } finally {
+      setSubmittingReply(null);
+    }
+  };
+
+  // Delete a reply
+  const handleDeleteReply = async (annotationId: number, replyId: number) => {
+    try {
+      await annotationsApi.deleteReply(annotationId, replyId);
+      // Remove from cache
+      setRepliesCache(prev => ({
+        ...prev,
+        [annotationId]: (prev[annotationId] || []).filter(r => r.id !== replyId),
+      }));
+      fetchPageData();
+      toast.success('Réponse supprimée');
+    } catch (error) {
+      toast.error('Erreur lors de la suppression');
     }
   };
 
@@ -969,7 +1055,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                           </div>
                         </div>
                         <p className="mt-2 text-sm">{annotation.content}</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
                           <Badge variant="outline" className={cn(
                             'text-xs',
                             annotation.type === 'highlight' && 'bg-yellow-100',
@@ -988,7 +1074,91 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                               {annotation.resolved_in_version_number && ` (v${annotation.resolved_in_version_number})`}
                             </Badge>
                           )}
+                          {/* Reply button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs ml-auto"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleReplies(annotation.id);
+                            }}
+                          >
+                            <MessageCircle className="h-3 w-3 mr-1" />
+                            {annotation.reply_count || 0}
+                            {expandedReplies.has(annotation.id) ? (
+                              <ChevronUp className="h-3 w-3 ml-1" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3 ml-1" />
+                            )}
+                          </Button>
                         </div>
+
+                        {/* Replies section */}
+                        {expandedReplies.has(annotation.id) && (
+                          <div className="mt-3 pt-3 border-t space-y-2" onClick={(e) => e.stopPropagation()}>
+                            {loadingReplies.has(annotation.id) ? (
+                              <div className="flex items-center justify-center py-2">
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : (
+                              <>
+                                {/* Existing replies */}
+                                {(repliesCache[annotation.id] || []).map((reply) => (
+                                  <div key={reply.id} className="bg-muted/50 rounded p-2 text-sm">
+                                    <div className="flex items-start justify-between">
+                                      <div>
+                                        <span className="font-medium">{reply.author_name}</span>
+                                        <span className="text-xs text-muted-foreground ml-2">
+                                          {new Date(reply.created_at).toLocaleDateString('fr-FR')}
+                                        </span>
+                                      </div>
+                                      {(user?.role === 'admin' || user?.role === 'editeur' || user?.id === reply.created_by) && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-5 w-5 text-destructive"
+                                          onClick={() => handleDeleteReply(annotation.id, reply.id)}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                    <p className="mt-1">{reply.content}</p>
+                                  </div>
+                                ))}
+
+                                {/* Reply input */}
+                                <div className="flex gap-2">
+                                  <Input
+                                    placeholder="Répondre..."
+                                    value={replyInputs[annotation.id] || ''}
+                                    onChange={(e) => setReplyInputs(prev => ({ ...prev, [annotation.id]: e.target.value }))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSubmitReply(annotation.id);
+                                      }
+                                    }}
+                                    className="h-8 text-sm"
+                                  />
+                                  <Button
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={!replyInputs[annotation.id]?.trim() || submittingReply === annotation.id}
+                                    onClick={() => handleSubmitReply(annotation.id)}
+                                  >
+                                    {submittingReply === annotation.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Send className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   );
