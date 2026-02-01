@@ -133,7 +133,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
     scale: 1,
     panX: 0,
     panY: 0,
-    containerHeight: typeof window !== 'undefined' ? window.innerHeight - 280 : 500
+    containerHeight: typeof window !== 'undefined' ? window.innerHeight * 0.5 : 400
   });
 
   // Reply state
@@ -538,7 +538,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         onClick={() => {
                           setCompareMode(true);
                           // Reset view state when entering compare mode
-                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: window.innerHeight - 280 });
+                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: window.innerHeight * 0.5 });
                           // Default to previous version for comparison
                           const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
                           const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];

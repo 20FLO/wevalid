@@ -104,8 +104,8 @@ export function PDFViewer({
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
-  // Resize state - default to fit available space (100vh - ~250px for header/footer/controls)
-  const [containerHeight, setContainerHeight] = useState<number>(typeof window !== 'undefined' ? window.innerHeight - 280 : 500);
+  // Resize state - default to 50% of viewport height
+  const [containerHeight, setContainerHeight] = useState<number>(typeof window !== 'undefined' ? window.innerHeight * 0.5 : 400);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef({ y: 0, height: 0 });
 
