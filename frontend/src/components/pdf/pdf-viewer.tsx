@@ -21,7 +21,7 @@ const textLayerStyles = `
 `;
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ZoomIn, ZoomOut, RotateCw, Loader2, Pencil, MousePointer, Eraser } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, Loader2, Pencil, MousePointer, Eraser, Maximize } from 'lucide-react';
 import type { Annotation, AnnotationPosition } from '@/types';
 
 // Configure PDF.js worker
@@ -38,6 +38,13 @@ export interface AnnotationData {
   inkPath?: string; // SVG path for ink annotations
 }
 
+// View state for synchronization between viewers
+export interface ViewState {
+  scale: number;
+  panX: number;
+  panY: number;
+}
+
 interface PDFViewerProps {
   url: string;
   annotations?: Annotation[];
@@ -46,6 +53,9 @@ interface PDFViewerProps {
   className?: string;
   highlightedAnnotationId?: number | null;
   readOnly?: boolean; // Disable annotations
+  // Synchronization props
+  viewState?: ViewState; // External view state (for sync)
+  onViewStateChange?: (state: ViewState) => void; // Callback when view changes
 }
 
 type DrawingMode = 'select' | 'draw' | 'erase';
@@ -72,6 +82,8 @@ export function PDFViewer({
   className,
   highlightedAnnotationId,
   readOnly = false,
+  viewState: externalViewState,
+  onViewStateChange,
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageContainerRef = useRef<HTMLDivElement>(null);
@@ -79,11 +91,22 @@ export function PDFViewer({
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState<number>(1);
-  const [scale, setScale] = useState<number>(1);
+  const [internalScale, setInternalScale] = useState<number>(1);
   const [rotation, setRotation] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Pan state
+  const [internalPanX, setInternalPanX] = useState<number>(0);
+  const [internalPanY, setInternalPanY] = useState<number>(0);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  // Use external state if provided, otherwise use internal state
+  const scale = externalViewState?.scale ?? internalScale;
+  const panX = externalViewState?.panX ?? internalPanX;
+  const panY = externalViewState?.panY ?? internalPanY;
 
   // Drawing state
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('select');
@@ -91,6 +114,23 @@ export function PDFViewer({
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  // Update view state (internal or external)
+  const updateViewState = useCallback((updates: Partial<ViewState>) => {
+    const newState: ViewState = {
+      scale: updates.scale ?? scale,
+      panX: updates.panX ?? panX,
+      panY: updates.panY ?? panY,
+    };
+
+    if (onViewStateChange) {
+      onViewStateChange(newState);
+    } else {
+      if (updates.scale !== undefined) setInternalScale(updates.scale);
+      if (updates.panX !== undefined) setInternalPanX(updates.panX);
+      if (updates.panY !== undefined) setInternalPanY(updates.panY);
+    }
+  }, [scale, panX, panY, onViewStateChange]);
 
   // Fetch PDF with authentication token
   useEffect(() => {
@@ -209,18 +249,25 @@ export function PDFViewer({
     isDraggingRef.current = false;
 
     if (drawingMode === 'draw' && !readOnly) {
+      // Drawing mode: start drawing
       const coords = getCanvasCoordinates(e);
       if (coords) {
         setIsDrawing(true);
         setCurrentPath([coords]);
       }
+    } else if (drawingMode === 'select' && scale > 1) {
+      // Select mode with zoom: start panning
+      setIsPanning(true);
+      panStartRef.current = { x: e.clientX, y: e.clientY, panX, panY };
+      e.preventDefault();
     }
-  }, [drawingMode, readOnly]);
+  }, [drawingMode, readOnly, scale, panX, panY]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     isDraggingRef.current = true;
 
     if (isDrawing && drawingMode === 'draw') {
+      // Drawing mode: continue drawing
       const coords = getCanvasCoordinates(e);
       if (coords) {
         setCurrentPath(prev => [...prev, coords]);
@@ -240,8 +287,16 @@ export function PDFViewer({
           ctx.stroke();
         }
       }
+    } else if (isPanning && drawingMode === 'select') {
+      // Select mode: pan the view
+      const deltaX = e.clientX - panStartRef.current.x;
+      const deltaY = e.clientY - panStartRef.current.y;
+      updateViewState({
+        panX: panStartRef.current.panX + deltaX,
+        panY: panStartRef.current.panY + deltaY,
+      });
     }
-  }, [isDrawing, drawingMode, currentPath, drawColor, scale]);
+  }, [isDrawing, drawingMode, currentPath, drawColor, scale, isPanning, updateViewState]);
 
   const handleMouseUp = useCallback(() => {
     if (isDrawing && drawingMode === 'draw' && currentPath.length > 1 && onAnnotate) {
@@ -281,6 +336,7 @@ export function PDFViewer({
 
     setIsDrawing(false);
     setCurrentPath([]);
+    setIsPanning(false);
   }, [isDrawing, drawingMode, currentPath, pageNumber, onAnnotate]);
 
   // Handle click for comment annotation (select mode only)
@@ -370,8 +426,22 @@ export function PDFViewer({
     }, 10);
   }, [onAnnotate, pageNumber, readOnly, drawingMode]);
 
-  const zoomIn = () => setScale((prev) => Math.min(prev + 0.25, 3));
-  const zoomOut = () => setScale((prev) => Math.max(prev - 0.25, 0.5));
+  const zoomIn = () => {
+    const newScale = Math.min(scale + 0.25, 3);
+    updateViewState({ scale: newScale });
+  };
+  const zoomOut = () => {
+    const newScale = Math.max(scale - 0.25, 0.5);
+    // Reset pan when zooming out to 100% or less
+    if (newScale <= 1) {
+      updateViewState({ scale: newScale, panX: 0, panY: 0 });
+    } else {
+      updateViewState({ scale: newScale });
+    }
+  };
+  const resetView = () => {
+    updateViewState({ scale: 1, panX: 0, panY: 0 });
+  };
   const rotate = () => setRotation((prev) => (prev + 90) % 360);
 
   // Parse position helper
@@ -407,14 +477,19 @@ export function PDFViewer({
       <div className="flex items-center justify-between gap-2 border-b bg-muted/50 p-2">
         {/* Zoom controls */}
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" onClick={zoomOut} disabled={scale <= 0.5}>
+          <Button variant="outline" size="icon" onClick={zoomOut} disabled={scale <= 0.5} title="Dézoomer">
             <ZoomOut className="h-4 w-4" />
           </Button>
           <span className="min-w-[50px] text-center text-sm">{Math.round(scale * 100)}%</span>
-          <Button variant="outline" size="icon" onClick={zoomIn} disabled={scale >= 3}>
+          <Button variant="outline" size="icon" onClick={zoomIn} disabled={scale >= 3} title="Zoomer">
             <ZoomIn className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" onClick={rotate}>
+          {scale !== 1 && (
+            <Button variant="outline" size="icon" onClick={resetView} title="Réinitialiser la vue">
+              <Maximize className="h-4 w-4" />
+            </Button>
+          )}
+          <Button variant="outline" size="icon" onClick={rotate} title="Pivoter">
             <RotateCw className="h-4 w-4" />
           </Button>
         </div>
@@ -460,10 +535,10 @@ export function PDFViewer({
         )}
       </div>
 
-      {/* PDF Container */}
+      {/* PDF Container - Fixed size with overflow hidden */}
       <div
         ref={containerRef}
-        className="relative flex-1 overflow-auto bg-muted/30"
+        className="relative flex-1 overflow-hidden bg-muted/30"
         style={{ minHeight: '500px' }}
       >
         {(isFetching || isLoading) && (
@@ -484,8 +559,10 @@ export function PDFViewer({
         {file && !error && (
           <div
             className={cn(
-              'flex justify-center p-4',
-              drawingMode === 'select' ? 'cursor-crosshair' : 'cursor-crosshair'
+              'flex justify-center p-4 h-full',
+              drawingMode === 'draw' ? 'cursor-crosshair' :
+              isPanning ? 'cursor-grabbing' :
+              scale > 1 ? 'cursor-grab' : 'cursor-crosshair'
             )}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
@@ -494,8 +571,16 @@ export function PDFViewer({
               handleMouseUp();
               handleTextSelectionEnd();
             }}
+            onMouseLeave={handleMouseUp}
           >
-            <div ref={pageContainerRef} className="relative inline-block">
+            <div
+              ref={pageContainerRef}
+              className="relative inline-block"
+              style={{
+                transform: `translate(${panX}px, ${panY}px)`,
+                transition: isPanning ? 'none' : 'transform 0.1s ease-out',
+              }}
+            >
               <Document
                 file={file}
                 onLoadSuccess={onDocumentLoadSuccess}
@@ -631,7 +716,9 @@ export function PDFViewer({
       {/* Instructions */}
       <div className="border-t bg-muted/50 p-2 text-center text-xs text-muted-foreground">
         {drawingMode === 'select'
-          ? 'Cliquez pour ajouter un commentaire ou sélectionnez du texte pour surligner'
+          ? scale > 1
+            ? 'Maintenez le clic pour déplacer la vue. Cliquez pour ajouter un commentaire.'
+            : 'Cliquez pour ajouter un commentaire ou sélectionnez du texte pour surligner'
           : 'Dessinez sur le PDF - le trait sera enregistré comme annotation'}
       </div>
     </div>

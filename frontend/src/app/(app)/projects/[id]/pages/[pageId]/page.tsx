@@ -63,6 +63,9 @@ const PDFViewer = dynamic(() => import('@/components/pdf/pdf-viewer').then(mod =
   loading: () => <Skeleton className="h-[500px] w-full" />,
 });
 
+// Import ViewState type for synchronized viewing
+import type { ViewState } from '@/components/pdf/pdf-viewer';
+
 interface PageDetailProps {
   params: Promise<{ id: string; pageId: string }>;
 }
@@ -117,6 +120,9 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [selectedVersion, setSelectedVersion] = useState<FileItem | null>(null);
   const [compareMode, setCompareMode] = useState(false);
   const [compareVersion, setCompareVersion] = useState<FileItem | null>(null);
+
+  // Synchronized view state for comparison mode
+  const [sharedViewState, setSharedViewState] = useState<ViewState>({ scale: 1, panX: 0, panY: 0 });
 
   // Fetch page data
   const fetchPageData = useCallback(async () => {
@@ -414,6 +420,8 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         size="sm"
                         onClick={() => {
                           setCompareMode(true);
+                          // Reset view state when entering compare mode
+                          setSharedViewState({ scale: 1, panX: 0, panY: 0 });
                           // Default to previous version for comparison
                           const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
                           const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];
@@ -461,7 +469,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
               </Card>
             )}
 
-            {/* Comparison view - side by side */}
+            {/* Comparison view - side by side with synchronized zoom/pan */}
             {compareMode && comparePdfUrl && isPDF ? (
               <div className="grid grid-cols-2 gap-4">
                 <Card>
@@ -479,6 +487,8 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       highlightedAnnotationId={highlightedAnnotationId}
                       readOnly={true}
                       className="min-h-[500px]"
+                      viewState={sharedViewState}
+                      onViewStateChange={setSharedViewState}
                     />
                   </CardContent>
                 </Card>
@@ -497,6 +507,8 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                       highlightedAnnotationId={highlightedAnnotationId}
                       readOnly={true}
                       className="min-h-[500px]"
+                      viewState={sharedViewState}
+                      onViewStateChange={setSharedViewState}
                     />
                   </CardContent>
                 </Card>
