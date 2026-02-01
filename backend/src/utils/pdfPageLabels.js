@@ -56,45 +56,105 @@ async function extractPageLabels(pdfPath) {
 }
 
 /**
- * Méthode alternative pour extraire les Page Labels
- * Utilise pdftk dump_data ou analyse le PDF directement
+ * Méthode alternative pour extraire les Page Labels avec qpdf
+ * Lit directement les objets PageLabels du PDF
  */
 async function extractPageLabelsAlternative(pdfPath) {
   try {
-    // Essayer avec pdftk
-    const { stdout } = await execPromise(`pdftk "${pdfPath}" dump_data 2>/dev/null | grep -E "^PageLabel" || echo ""`);
+    // Étape 1: Trouver l'objet PageLabels dans le catalogue
+    const { stdout: catalogOutput } = await execPromise(`qpdf --show-object=1 "${pdfPath}" 2>/dev/null || echo ""`);
 
+    // Chercher la référence PageLabels (ex: /PageLabels 6 0 R)
+    const pageLabelRefMatch = catalogOutput.match(/\/PageLabels\s+(\d+)\s+0\s+R/);
+    if (!pageLabelRefMatch) {
+      // Essayer de chercher dans tout le PDF
+      const { stdout: stringsOutput } = await execPromise(`strings "${pdfPath}" | grep -o "/PageLabels [0-9]* 0 R" | head -1`);
+      const altMatch = stringsOutput.match(/\/PageLabels\s+(\d+)\s+0\s+R/);
+      if (!altMatch) {
+        logger.info('Aucun objet PageLabels trouvé dans le PDF');
+        return [];
+      }
+      pageLabelRefMatch[1] = altMatch[1];
+    }
+
+    const pageLabelObjNum = pageLabelRefMatch[1];
+    logger.info(`Objet PageLabels trouvé: ${pageLabelObjNum}`);
+
+    // Étape 2: Lire l'objet PageLabels pour obtenir le tableau Nums
+    const { stdout: pageLabelObj } = await execPromise(`qpdf --show-object=${pageLabelObjNum} "${pdfPath}" 2>/dev/null`);
+
+    // Format: << /Nums [ 0 7 0 R ] >> ou << /Nums [ 0 << /S /D /St 7 >> ] >>
+    const numsMatch = pageLabelObj.match(/\/Nums\s*\[\s*(.+)\s*\]/s);
+    if (!numsMatch) {
+      logger.info('Pas de tableau Nums dans PageLabels');
+      return [];
+    }
+
+    const numsContent = numsMatch[1].trim();
     const pageLabels = [];
-    const lines = stdout.split('\n').filter(l => l.trim());
 
-    // Format pdftk: PageLabelNewIndex: X, PageLabelStart: Y, PageLabelPrefix: Z, PageLabelNumStyle: ...
-    let currentConfig = {};
+    // Parser le tableau Nums - peut contenir des références ou des dictionnaires inline
+    // Format: pageIndex objRef 0 R ou pageIndex << /S /D /St N >>
+    const refMatches = numsContent.matchAll(/(\d+)\s+(\d+)\s+0\s+R/g);
 
-    for (const line of lines) {
-      const [key, value] = line.split(':').map(s => s.trim());
+    for (const match of refMatches) {
+      const pageIndex = parseInt(match[1]);
+      const labelObjNum = match[2];
 
-      if (key === 'PageLabelNewIndex') {
-        if (Object.keys(currentConfig).length > 0) {
-          // Sauvegarder la config précédente
-        }
-        currentConfig = { startIndex: parseInt(value) };
-      } else if (key === 'PageLabelStart') {
-        currentConfig.startNumber = parseInt(value);
-      } else if (key === 'PageLabelPrefix') {
-        currentConfig.prefix = value;
-      } else if (key === 'PageLabelNumStyle') {
-        currentConfig.style = value;
+      // Lire l'objet label
+      const { stdout: labelObj } = await execPromise(`qpdf --show-object=${labelObjNum} "${pdfPath}" 2>/dev/null`);
+
+      // Extraire /St (start number)
+      const stMatch = labelObj.match(/\/St\s+(\d+)/);
+      const prefixMatch = labelObj.match(/\/P\s*\(([^)]*)\)/);
+      const styleMatch = labelObj.match(/\/S\s+\/([A-Za-z]+)/);
+
+      if (stMatch) {
+        const startNumber = parseInt(stMatch[1]);
+        const prefix = prefixMatch ? prefixMatch[1] : '';
+        const style = styleMatch ? styleMatch[1] : 'D';
+
+        logger.info(`Page ${pageIndex}: label start=${startNumber}, prefix="${prefix}", style=${style}`);
+
+        pageLabels.push({
+          pdfPage: pageIndex + 1, // pdfPage est 1-indexed
+          label: prefix + startNumber.toString(),
+          startNumber: startNumber,
+          style: style
+        });
       }
     }
 
-    // Si pas de labels trouvés, retourner tableau vide
+    // Aussi chercher les dictionnaires inline << /S /D /St N >>
+    const inlineMatch = numsContent.match(/(\d+)\s*<<([^>]+)>>/);
+    if (inlineMatch && pageLabels.length === 0) {
+      const pageIndex = parseInt(inlineMatch[1]);
+      const dictContent = inlineMatch[2];
+
+      const stMatch = dictContent.match(/\/St\s+(\d+)/);
+      const prefixMatch = dictContent.match(/\/P\s*\(([^)]*)\)/);
+
+      if (stMatch) {
+        const startNumber = parseInt(stMatch[1]);
+        const prefix = prefixMatch ? prefixMatch[1] : '';
+
+        logger.info(`Page ${pageIndex} (inline): label start=${startNumber}, prefix="${prefix}"`);
+
+        pageLabels.push({
+          pdfPage: pageIndex + 1,
+          label: prefix + startNumber.toString(),
+          startNumber: startNumber
+        });
+      }
+    }
+
     if (pageLabels.length === 0) {
-      logger.info('Aucun Page Label trouvé dans le PDF, utilisation des numéros de page standard');
+      logger.info('Aucun Page Label trouvé dans le PDF');
     }
 
     return pageLabels;
   } catch (error) {
-    logger.warn('Erreur extraction Page Labels alternative:', error.message);
+    logger.warn('Erreur extraction Page Labels avec qpdf:', error.message);
     return [];
   }
 }
@@ -148,11 +208,12 @@ function parsePageLabel(label) {
 
 /**
  * Crée un mapping entre les pages PDF et les pages projet basé sur les labels
- * @param {Array<{pdfPage: number, label: string}>} pageLabels - Labels extraits du PDF
+ * @param {Array<{pdfPage: number, label: string, startNumber?: number}>} pageLabels - Labels extraits du PDF
  * @param {Array<{id: number, page_number: number}>} projectPages - Pages du projet
+ * @param {number} totalPdfPages - Nombre total de pages dans le PDF
  * @returns {Array<{pdfPage: number, projectPageId: number, projectPageNumber: number}>}
  */
-function createPageMapping(pageLabels, projectPages) {
+function createPageMapping(pageLabels, projectPages, totalPdfPages = 1) {
   const mapping = [];
 
   // Créer un index des pages projet par numéro
@@ -163,16 +224,35 @@ function createPageMapping(pageLabels, projectPages) {
 
   // Si on a des labels, les utiliser pour le mapping
   if (pageLabels.length > 0) {
-    for (const { pdfPage, label } of pageLabels) {
-      const pageNumber = parsePageLabel(label);
+    // Trier les labels par pdfPage
+    const sortedLabels = [...pageLabels].sort((a, b) => a.pdfPage - b.pdfPage);
 
-      if (pageNumber && projectPagesByNumber[pageNumber]) {
-        mapping.push({
-          pdfPage,
-          projectPageId: projectPagesByNumber[pageNumber].id,
-          projectPageNumber: pageNumber,
-          label
-        });
+    // Pour chaque page du PDF, déterminer son numéro de page projet
+    for (let pdfPage = 1; pdfPage <= totalPdfPages; pdfPage++) {
+      // Trouver le label applicable (le dernier label avec pdfPage <= page courante)
+      let applicableLabel = null;
+      for (const label of sortedLabels) {
+        if (label.pdfPage <= pdfPage) {
+          applicableLabel = label;
+        } else {
+          break;
+        }
+      }
+
+      if (applicableLabel) {
+        // Calculer le numéro de page: startNumber + (pdfPage - pdfPage du label)
+        const pageNumber = applicableLabel.startNumber
+          ? applicableLabel.startNumber + (pdfPage - applicableLabel.pdfPage)
+          : parsePageLabel(applicableLabel.label);
+
+        if (pageNumber && projectPagesByNumber[pageNumber]) {
+          mapping.push({
+            pdfPage,
+            projectPageId: projectPagesByNumber[pageNumber].id,
+            projectPageNumber: pageNumber,
+            label: applicableLabel.label
+          });
+        }
       }
     }
   }
@@ -185,14 +265,23 @@ function createPageMapping(pageLabels, projectPages) {
  */
 async function countPDFPages(pdfPath) {
   try {
-    const { stdout } = await execPromise(`pdfinfo "${pdfPath}" | grep "^Pages:" | awk '{print $2}'`);
+    // Essayer avec pdfinfo d'abord
+    const { stdout } = await execPromise(`pdfinfo "${pdfPath}" 2>/dev/null | grep "^Pages:" | awk '{print $2}'`);
     const pageCount = parseInt(stdout.trim());
 
-    if (isNaN(pageCount) || pageCount <= 0) {
-      throw new Error('Nombre de pages invalide');
+    if (!isNaN(pageCount) && pageCount > 0) {
+      return pageCount;
     }
 
-    return pageCount;
+    // Fallback avec qpdf
+    const { stdout: qpdfOut } = await execPromise(`qpdf --show-npages "${pdfPath}" 2>/dev/null`);
+    const qpdfCount = parseInt(qpdfOut.trim());
+
+    if (!isNaN(qpdfCount) && qpdfCount > 0) {
+      return qpdfCount;
+    }
+
+    throw new Error('Nombre de pages invalide');
   } catch (error) {
     logger.error('Erreur comptage pages PDF:', error);
     throw new Error('Impossible de compter les pages du PDF');

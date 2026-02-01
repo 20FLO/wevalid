@@ -9,7 +9,8 @@ RUN apk add --no-cache \
     g++ \
     ghostscript \
     imagemagick \
-    poppler-utils
+    poppler-utils \
+    qpdf
 
 # Copier package files
 COPY package*.json ./
