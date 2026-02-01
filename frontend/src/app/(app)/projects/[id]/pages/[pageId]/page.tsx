@@ -122,7 +122,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [compareVersion, setCompareVersion] = useState<FileItem | null>(null);
 
   // Synchronized view state for comparison mode
-  const [sharedViewState, setSharedViewState] = useState<ViewState>({ scale: 1, panX: 0, panY: 0 });
+  const [sharedViewState, setSharedViewState] = useState<ViewState>({ scale: 1, panX: 0, panY: 0, containerHeight: 500 });
 
   // Fetch page data
   const fetchPageData = useCallback(async () => {
@@ -421,7 +421,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         onClick={() => {
                           setCompareMode(true);
                           // Reset view state when entering compare mode
-                          setSharedViewState({ scale: 1, panX: 0, panY: 0 });
+                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: 500 });
                           // Default to previous version for comparison
                           const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
                           const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];
@@ -529,35 +529,13 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         return;
                       }
 
-                      // For ink annotations, save directly without dialog
-                      if (data.type === 'ink' && data.inkPath) {
-                        try {
-                          await annotationsApi.create({
-                            page_id: pageIdNum,
-                            type: 'ink',
-                            content: 'Dessin',
-                            position: {
-                              x: data.x,
-                              y: data.y,
-                              width: data.width,
-                              height: data.height,
-                              page_number: data.pageNumber,
-                              ink_path: data.inkPath,
-                            },
-                            color: '#FF0000',
-                          });
-                          toast.success('Dessin enregistré');
-                          fetchPageData();
-                        } catch {
-                          toast.error('Erreur lors de l\'enregistrement');
-                        }
-                        return;
-                      }
-
+                      // Store annotation data and open dialog for all types (including ink/drawings)
                       setAnnotationData(data);
-                      setAnnotationType(data.type === 'highlight' ? 'highlight' : 'comment');
+                      setAnnotationType(data.type === 'highlight' ? 'highlight' : data.type === 'ink' ? 'comment' : 'comment');
                       if (data.selectedText) {
                         setAnnotationContent(data.selectedText);
+                      } else {
+                        setAnnotationContent('');
                       }
                       setShowAnnotationDialog(true);
                     }}
@@ -1086,19 +1064,28 @@ export default function PageDetailPage({ params }: PageDetailProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {annotationData?.type === 'highlight' ? 'Ajouter un surlignage' : 'Ajouter un commentaire'}
+              {annotationData?.type === 'highlight' ? 'Ajouter un surlignage' :
+               annotationData?.type === 'ink' ? 'Ajouter un dessin' : 'Ajouter un commentaire'}
             </DialogTitle>
             <DialogDescription>
               {annotationData?.type === 'highlight' && annotationData.selectedText
                 ? `Texte sélectionné : "${annotationData.selectedText.substring(0, 100)}${annotationData.selectedText.length > 100 ? '...' : ''}"`
+                : annotationData?.type === 'ink'
+                ? 'Ajoutez une description à votre dessin.'
                 : 'Ajoutez un commentaire sur cette page.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>{annotationData?.type === 'highlight' ? 'Note (optionnel)' : 'Commentaire'}</Label>
+              <Label>
+                {annotationData?.type === 'highlight' ? 'Note (optionnel)' :
+                 annotationData?.type === 'ink' ? 'Description du dessin' : 'Commentaire'}
+              </Label>
               <Textarea
-                placeholder={annotationData?.type === 'highlight' ? 'Ajouter une note au surlignage...' : 'Votre commentaire...'}
+                placeholder={
+                  annotationData?.type === 'highlight' ? 'Ajouter une note au surlignage...' :
+                  annotationData?.type === 'ink' ? 'Décrivez ce dessin...' : 'Votre commentaire...'
+                }
                 value={annotationContent}
                 onChange={(e) => setAnnotationContent(e.target.value)}
                 rows={4}
@@ -1111,7 +1098,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
             </Button>
             <Button
               onClick={handleSubmitAnnotation}
-              disabled={!annotationContent.trim() || isSubmittingAnnotation}
+              disabled={(annotationData?.type !== 'ink' && !annotationContent.trim()) || isSubmittingAnnotation}
             >
               {isSubmittingAnnotation && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Ajouter

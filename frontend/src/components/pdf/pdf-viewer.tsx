@@ -43,6 +43,7 @@ export interface ViewState {
   scale: number;
   panX: number;
   panY: number;
+  containerHeight?: number;
 }
 
 interface PDFViewerProps {
@@ -112,6 +113,7 @@ export function PDFViewer({
   const scale = externalViewState?.scale ?? internalScale;
   const panX = externalViewState?.panX ?? internalPanX;
   const panY = externalViewState?.panY ?? internalPanY;
+  const effectiveContainerHeight = externalViewState?.containerHeight ?? containerHeight;
 
   // Drawing state
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('select');
@@ -126,6 +128,7 @@ export function PDFViewer({
       scale: updates.scale ?? scale,
       panX: updates.panX ?? panX,
       panY: updates.panY ?? panY,
+      containerHeight: updates.containerHeight ?? effectiveContainerHeight,
     };
 
     if (onViewStateChange) {
@@ -134,8 +137,9 @@ export function PDFViewer({
       if (updates.scale !== undefined) setInternalScale(updates.scale);
       if (updates.panX !== undefined) setInternalPanX(updates.panX);
       if (updates.panY !== undefined) setInternalPanY(updates.panY);
+      if (updates.containerHeight !== undefined) setContainerHeight(updates.containerHeight);
     }
-  }, [scale, panX, panY, onViewStateChange]);
+  }, [scale, panX, panY, effectiveContainerHeight, onViewStateChange]);
 
   // Fetch PDF with authentication token
   useEffect(() => {
@@ -440,12 +444,12 @@ export function PDFViewer({
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
-    resizeStartRef.current = { y: e.clientY, height: containerHeight };
+    resizeStartRef.current = { y: e.clientY, height: effectiveContainerHeight };
 
     const handleResizeMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - resizeStartRef.current.y;
       const newHeight = Math.max(300, Math.min(window.innerHeight * 0.9, resizeStartRef.current.height + deltaY));
-      setContainerHeight(newHeight);
+      updateViewState({ containerHeight: newHeight });
     };
 
     const handleResizeEnd = () => {
@@ -456,7 +460,7 @@ export function PDFViewer({
 
     document.addEventListener('mousemove', handleResizeMove);
     document.addEventListener('mouseup', handleResizeEnd);
-  }, [containerHeight]);
+  }, [effectiveContainerHeight, updateViewState]);
 
   const zoomIn = () => {
     const newScale = Math.min(scale + 0.25, 3);
@@ -571,7 +575,7 @@ export function PDFViewer({
       <div
         ref={containerRef}
         className="relative overflow-hidden bg-muted/30"
-        style={{ height: `${containerHeight}px` }}
+        style={{ height: `${effectiveContainerHeight}px` }}
       >
         {(isFetching || isLoading) && (
           <div className="absolute inset-0 flex items-center justify-center">
