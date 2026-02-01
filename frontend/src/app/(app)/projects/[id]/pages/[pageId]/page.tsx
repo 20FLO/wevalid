@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { projectsApi } from '@/lib/api/projects';
 import { annotationsApi, CreateAnnotationData } from '@/lib/api/annotations';
 import { filesApi } from '@/lib/api/files';
+import { usersApi } from '@/lib/api/users';
 import { useAuth } from '@/hooks/use-auth';
 import { cn } from '@/lib/utils';
 import { Header } from '@/components/layout/header';
@@ -58,8 +59,9 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus, AnnotationReply } from '@/types';
+import { MentionTextarea } from '@/components/ui/mention-textarea';
+import { MentionInput } from '@/components/ui/mention-input';
+import type { Page, Annotation, WorkflowHistory, FileItem, PageStatus, AnnotationReply, User } from '@/types';
 import { PAGE_STATUS_LABELS, PAGE_STATUS_COLORS, LOCKED_STATUSES } from '@/types';
 
 // Import PDF viewer dynamically to avoid SSR issues
@@ -126,8 +128,13 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [compareMode, setCompareMode] = useState(false);
   const [compareVersion, setCompareVersion] = useState<FileItem | null>(null);
 
-  // Synchronized view state for comparison mode
-  const [sharedViewState, setSharedViewState] = useState<ViewState>({ scale: 1, panX: 0, panY: 0, containerHeight: 500 });
+  // Synchronized view state for comparison mode - default to 70vh
+  const [sharedViewState, setSharedViewState] = useState<ViewState>({
+    scale: 1,
+    panX: 0,
+    panY: 0,
+    containerHeight: typeof window !== 'undefined' ? window.innerHeight * 0.7 : 600
+  });
 
   // Reply state
   const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
@@ -135,6 +142,9 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   const [replyInputs, setReplyInputs] = useState<Record<number, string>>({});
   const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
   const [submittingReply, setSubmittingReply] = useState<number | null>(null);
+
+  // Users for mentions
+  const [mentionUsers, setMentionUsers] = useState<User[]>([]);
 
   // Fetch page data
   const fetchPageData = useCallback(async () => {
@@ -178,6 +188,20 @@ export default function PageDetailPage({ params }: PageDetailProps) {
   useEffect(() => {
     fetchPageData();
   }, [fetchPageData]);
+
+  // Load users for mentions
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const { users } = await usersApi.getAll();
+        setMentionUsers(users);
+      } catch (error) {
+        // Silently fail - mentions will just not have autocomplete
+        console.warn('Could not load users for mentions:', error);
+      }
+    };
+    loadUsers();
+  }, []);
 
   // Handle image click for annotation
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -507,7 +531,7 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                         onClick={() => {
                           setCompareMode(true);
                           // Reset view state when entering compare mode
-                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: 500 });
+                          setSharedViewState({ scale: 1, panX: 0, panY: 0, containerHeight: window.innerHeight * 0.7 });
                           // Default to previous version for comparison
                           const currentIndex = fileVersions.findIndex(v => v.id === selectedVersion?.id);
                           const prevVersion = fileVersions[currentIndex + 1] || fileVersions[0];
@@ -1130,12 +1154,13 @@ export default function PageDetailPage({ params }: PageDetailProps) {
 
                                 {/* Reply input */}
                                 <div className="flex gap-2">
-                                  <Input
-                                    placeholder="Répondre..."
+                                  <MentionInput
+                                    placeholder="Répondre... (@ pour mentionner)"
                                     value={replyInputs[annotation.id] || ''}
-                                    onChange={(e) => setReplyInputs(prev => ({ ...prev, [annotation.id]: e.target.value }))}
+                                    onChange={(value) => setReplyInputs(prev => ({ ...prev, [annotation.id]: value }))}
+                                    users={mentionUsers}
                                     onKeyDown={(e) => {
-                                      if (e.key === 'Enter' && !e.shiftKey) {
+                                      if (e.key === 'Enter' && !e.shiftKey && !document.querySelector('.mention-suggestions')) {
                                         e.preventDefault();
                                         handleSubmitReply(annotation.id);
                                       }
@@ -1251,13 +1276,14 @@ export default function PageDetailPage({ params }: PageDetailProps) {
                 {annotationData?.type === 'highlight' ? 'Note (optionnel)' :
                  annotationData?.type === 'ink' ? 'Description du dessin' : 'Commentaire'}
               </Label>
-              <Textarea
+              <MentionTextarea
                 placeholder={
-                  annotationData?.type === 'highlight' ? 'Ajouter une note au surlignage...' :
-                  annotationData?.type === 'ink' ? 'Décrivez ce dessin...' : 'Votre commentaire...'
+                  annotationData?.type === 'highlight' ? 'Ajouter une note au surlignage... (@ pour mentionner)' :
+                  annotationData?.type === 'ink' ? 'Décrivez ce dessin... (@ pour mentionner)' : 'Votre commentaire... (@ pour mentionner)'
                 }
                 value={annotationContent}
-                onChange={(e) => setAnnotationContent(e.target.value)}
+                onChange={setAnnotationContent}
+                users={mentionUsers}
                 rows={4}
               />
             </div>
