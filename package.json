@@ -4,7 +4,7 @@
   "private": true,
   "description": "Plateforme de gestion de production éditoriale",
   "engines": {
-    "node": ">=20.x <=22.x"
+    "node": ">=22.x"
   },
   "scripts": {
     "dev": "concurrently -k -n BACK,FRONT -c blue,green \"npm run backend:up\" \"npm run frontend:dev\"",
