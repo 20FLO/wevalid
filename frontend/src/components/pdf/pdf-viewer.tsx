@@ -21,7 +21,7 @@ const textLayerStyles = `
 `;
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ZoomIn, ZoomOut, RotateCw, Loader2, Pencil, MousePointer, Eraser, Maximize } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, Loader2, Pencil, MousePointer, Eraser, Maximize, GripHorizontal } from 'lucide-react';
 import type { Annotation, AnnotationPosition } from '@/types';
 
 // Configure PDF.js worker
@@ -102,6 +102,11 @@ export function PDFViewer({
   const [internalPanY, setInternalPanY] = useState<number>(0);
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  // Resize state
+  const [containerHeight, setContainerHeight] = useState<number>(500);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef({ y: 0, height: 0 });
 
   // Use external state if provided, otherwise use internal state
   const scale = externalViewState?.scale ?? internalScale;
@@ -344,7 +349,7 @@ export function PDFViewer({
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onAnnotate || readOnly || drawingMode !== 'select') return;
 
-      // If we were dragging (selecting text), don't create click annotation
+      // If we were dragging (selecting text or panning), don't create click annotation
       if (isDraggingRef.current) {
         const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
         const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
@@ -365,6 +370,11 @@ export function PDFViewer({
       const rect = pageElement.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 100;
       const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+      // Only allow annotations inside the PDF (0-100% bounds)
+      if (x < 0 || x > 100 || y < 0 || y > 100) {
+        return;
+      }
 
       onAnnotate({ x, y, pageNumber, type: 'click' });
     },
@@ -425,6 +435,28 @@ export function PDFViewer({
       setTimeout(() => selection.removeAllRanges(), 100);
     }, 10);
   }, [onAnnotate, pageNumber, readOnly, drawingMode]);
+
+  // Resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    resizeStartRef.current = { y: e.clientY, height: containerHeight };
+
+    const handleResizeMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - resizeStartRef.current.y;
+      const newHeight = Math.max(300, Math.min(window.innerHeight * 0.9, resizeStartRef.current.height + deltaY));
+      setContainerHeight(newHeight);
+    };
+
+    const handleResizeEnd = () => {
+      setIsResizing(false);
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+    };
+
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+  }, [containerHeight]);
 
   const zoomIn = () => {
     const newScale = Math.min(scale + 0.25, 3);
@@ -538,8 +570,8 @@ export function PDFViewer({
       {/* PDF Container - Resizable height with overflow hidden */}
       <div
         ref={containerRef}
-        className="relative overflow-hidden bg-muted/30 resize-y"
-        style={{ height: '500px', minHeight: '300px', maxHeight: '90vh' }}
+        className="relative overflow-hidden bg-muted/30"
+        style={{ height: `${containerHeight}px` }}
       >
         {(isFetching || isLoading) && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -711,6 +743,18 @@ export function PDFViewer({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Resize handle */}
+      <div
+        className={cn(
+          'flex items-center justify-center h-3 bg-muted/50 border-t cursor-ns-resize hover:bg-muted transition-colors',
+          isResizing && 'bg-muted'
+        )}
+        onMouseDown={handleResizeStart}
+        title="Glissez pour redimensionner"
+      >
+        <GripHorizontal className="h-3 w-3 text-muted-foreground" />
       </div>
 
       {/* Instructions */}
