@@ -8,7 +8,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     ghostscript \
-    imagemagick
+    imagemagick \
+    poppler-utils
 
 # Copier package files
 COPY package*.json ./
