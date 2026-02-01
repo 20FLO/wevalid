@@ -4,6 +4,7 @@ const { pool } = require('../config/database');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const logger = require('../utils/logger');
+const { sendProjectInvitationNotification } = require('../utils/emailService');
 
 // Tous les endpoints nécessitent authentification
 router.use(authenticateToken);
@@ -362,6 +363,41 @@ router.post('/:id/members', authorizeRoles('admin', 'editeur', 'fabricant'), asy
     );
 
     logger.info('Membre ajouté au projet:', { projectId: id, userId: user_id, addedBy: req.user.id });
+
+    // Récupérer les infos du projet et de l'inviteur pour l'email
+    const projectResult = await pool.query(
+      'SELECT title FROM projects WHERE id = $1',
+      [id]
+    );
+    const inviterResult = await pool.query(
+      'SELECT first_name, last_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const membersResult = await pool.query(
+      `SELECT u.first_name, u.last_name, u.role
+       FROM project_members pm
+       JOIN users u ON pm.user_id = u.id
+       WHERE pm.project_id = $1`,
+      [id]
+    );
+
+    const newMember = userCheck.rows[0];
+    const project = projectResult.rows[0];
+    const inviter = inviterResult.rows[0];
+    const frontendUrl = process.env.FRONTEND_URL || 'https://wevalid.fr';
+
+    // Envoyer l'email de notification (sans bloquer)
+    sendProjectInvitationNotification({
+      recipientEmail: newMember.email,
+      recipientName: `${newMember.first_name} ${newMember.last_name}`,
+      projectTitle: project.title,
+      invitedByName: `${inviter.first_name} ${inviter.last_name}`,
+      role: newMember.role,
+      projectUrl: `${frontendUrl}/projects/${id}`,
+      members: membersResult.rows
+    }).catch(err => {
+      logger.error('Erreur envoi notification ajout projet:', { error: err.message, to: newMember.email });
+    });
 
     res.status(201).json({
       message: 'Membre ajouté avec succès',

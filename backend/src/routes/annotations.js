@@ -7,6 +7,7 @@ const logger = require('../utils/logger');
 const { parseString, Builder } = require('xml2js');
 const { promisify } = require('util');
 const parseXML = promisify(parseString);
+const { sendMentionNotification, parseMentions } = require('../utils/emailService');
 
 router.use(authenticateToken);
 
@@ -83,6 +84,63 @@ router.post('/', validate(schemas.createAnnotation), async (req, res) => {
       fileId: file_id,
       createdBy: req.user.id
     });
+
+    // Vérifier les mentions et envoyer des notifications
+    if (content) {
+      const mentionedNames = parseMentions(content);
+      if (mentionedNames.length > 0) {
+        // Récupérer les infos de la page et du projet
+        const pageInfo = await pool.query(
+          `SELECT p.page_number, pr.title as project_title, pr.id as project_id
+           FROM pages p
+           JOIN projects pr ON p.project_id = pr.id
+           WHERE p.id = $1`,
+          [page_id]
+        );
+        const pageData = pageInfo.rows[0];
+
+        // Récupérer les membres du projet qui correspondent aux noms mentionnés
+        const membersResult = await pool.query(
+          `SELECT u.id, u.email, u.first_name, u.last_name
+           FROM project_members pm
+           JOIN users u ON pm.user_id = u.id
+           WHERE pm.project_id = $1 AND u.is_active = true`,
+          [pageData.project_id]
+        );
+
+        // Récupérer les infos de l'auteur
+        const authorResult = await pool.query(
+          'SELECT first_name, last_name, role FROM users WHERE id = $1',
+          [req.user.id]
+        );
+        const author = authorResult.rows[0];
+        const authorName = `${author.first_name} ${author.last_name}`;
+        const frontendUrl = process.env.FRONTEND_URL || 'https://wevalid.fr';
+
+        // Pour chaque membre, vérifier si son nom est mentionné
+        for (const member of membersResult.rows) {
+          const fullName = `${member.first_name} ${member.last_name}`;
+          const isMentioned = mentionedNames.some(name =>
+            name.toLowerCase() === fullName.toLowerCase()
+          );
+
+          if (isMentioned && member.id !== req.user.id) {
+            sendMentionNotification({
+              recipientEmail: member.email,
+              recipientName: fullName,
+              mentionedByName: authorName,
+              mentionedByRole: author.role,
+              projectTitle: pageData.project_title,
+              pageNumber: pageData.page_number,
+              commentText: content,
+              pageUrl: `${frontendUrl}/projects/${pageData.project_id}/pages/${page_id}`
+            }).catch(err => {
+              logger.error('Erreur envoi notification mention:', { error: err.message, to: member.email });
+            });
+          }
+        }
+      }
+    }
 
     res.status(201).json({
       message: 'Annotation créée avec succès',
@@ -282,6 +340,56 @@ router.post('/:id/replies', async (req, res) => {
       replyId: reply.id,
       createdBy: req.user.id
     });
+
+    // Vérifier les mentions et envoyer des notifications
+    const mentionedNames = parseMentions(content);
+    if (mentionedNames.length > 0) {
+      const pageId = annotationCheck.rows[0].page_id;
+
+      // Récupérer les infos de la page et du projet
+      const pageInfo = await pool.query(
+        `SELECT p.page_number, pr.title as project_title, pr.id as project_id
+         FROM pages p
+         JOIN projects pr ON p.project_id = pr.id
+         WHERE p.id = $1`,
+        [pageId]
+      );
+      const pageData = pageInfo.rows[0];
+
+      // Récupérer les membres du projet
+      const membersResult = await pool.query(
+        `SELECT u.id, u.email, u.first_name, u.last_name
+         FROM project_members pm
+         JOIN users u ON pm.user_id = u.id
+         WHERE pm.project_id = $1 AND u.is_active = true`,
+        [pageData.project_id]
+      );
+
+      const frontendUrl = process.env.FRONTEND_URL || 'https://wevalid.fr';
+
+      // Pour chaque membre, vérifier si son nom est mentionné
+      for (const member of membersResult.rows) {
+        const fullName = `${member.first_name} ${member.last_name}`;
+        const isMentioned = mentionedNames.some(name =>
+          name.toLowerCase() === fullName.toLowerCase()
+        );
+
+        if (isMentioned && member.id !== req.user.id) {
+          sendMentionNotification({
+            recipientEmail: member.email,
+            recipientName: fullName,
+            mentionedByName: reply.author_name,
+            mentionedByRole: reply.author_role,
+            projectTitle: pageData.project_title,
+            pageNumber: pageData.page_number,
+            commentText: content,
+            pageUrl: `${frontendUrl}/projects/${pageData.project_id}/pages/${pageId}`
+          }).catch(err => {
+            logger.error('Erreur envoi notification mention:', { error: err.message, to: member.email });
+          });
+        }
+      }
+    }
 
     res.status(201).json({
       message: 'Réponse ajoutée avec succès',
